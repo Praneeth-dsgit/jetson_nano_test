@@ -1,0 +1,88 @@
+# Jetson Nano 4GB Optimized Configuration
+# This configuration is specifically tuned for Jetson Nano 4GB hardware
+# Copy this to jetson_config.yaml on your Jetson Nano for optimal performance
+
+paths:
+  data_root: 'athlete_training_data'
+  game_data_root: 'athlete_game_data'
+  prediction_outputs: 'prediction_outputs'
+  models_root: 'athlete_models_pkl'
+  hb_tensors_updated: 'athlete_models_tensors_updated'
+  hb_tensors_previous: 'athlete_models_tensors_previous'
+  data_file_pattern: '*.csv'
+  model_path: 'rf_model.pkl'
+  hb_path: 'hb_rf_model.zip'
+  onnx_path: 'rf_model.onnx'
+
+# Jetson Nano 4GB Optimized Training Parameters
+training:
+  n_estimators: 60             # Reduced for faster training (was 100)
+  max_depth: 6                 # Reduced complexity for memory efficiency
+  min_samples_split: 8         # Increased for simpler trees
+  min_samples_leaf: 15         # Increased for better generalization
+  random_state: 42
+  n_jobs: 2                    # Use 2 cores, leave 2 for system
+  sessions_to_use: 2           # Use 2 sessions instead of 3 (less memory)
+  min_sessions_required: 2     # Reduced minimum requirement
+
+monitoring:
+  poll_interval_secs: 15       # Slightly longer interval to reduce overhead
+  debounce_secs: 5             # Longer debounce for stability
+  auto_update_enabled: true
+
+# Jetson Nano 4GB Hardware Optimizations
+jetson:
+  device_detection: true
+  memory_limit_mb: 1800        # Conservative limit for 4GB system
+  batch_size: 400              # Smaller batches for memory efficiency
+  use_mixed_precision: true    # Enable for memory savings
+  gpu_memory_fraction: 0.5     # Conservative GPU memory usage
+
+backup:
+  enabled: true
+  keep_previous_versions: 2    # Reduced to save storage
+  backup_on_update: true
+
+retraining:
+  accuracy_threshold: 0.80     # Slightly lower threshold for embedded performance
+  min_samples_threshold: 300   # Reduced threshold
+  force_retrain_on_new_data: true
+
+logging:
+  level: 'INFO'
+  log_to_file: true
+  log_file: 'jetson_training.log'
+  console_output: true
+  detailed_progress: false     # Reduced logging for performance
+  logs_dir: './logs'
+
+# Memory-Efficient Feature Engineering
+feature_engineering:
+  enabled: true
+  rolling_window: 8            # Smaller window for memory efficiency
+  sampling_frequency: 10       # Keep 10Hz sampling
+  features:
+    resultant: true
+    rolling_stats: true
+    jerk: true
+    fft_features: false        # Disable FFT for memory savings (optional)
+    acc_components: ['acc_x', 'acc_y', 'acc_z']
+
+# Prediction Conflict Prevention (unchanged)
+prediction_check:
+  enabled: true
+  prediction_script_names: 
+    - 'test_30_players.py'
+    - 'test_deployment1.py'
+  lockfile_path: '.prediction_running.lock'
+  check_interval_secs: 5
+  max_wait_time_secs: 300
+  force_training: false
+
+# Jetson Nano Performance Monitoring
+performance:
+  enable_temperature_monitoring: true
+  temperature_warning_threshold: 70    # Celsius
+  temperature_critical_threshold: 80   # Celsius
+  memory_warning_threshold: 85         # Percentage
+  auto_performance_mode: true          # Enable nvpmodel -m 0 equivalent

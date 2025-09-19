@@ -1,0 +1,88 @@
+# Jetson Nano ML Training Configuration
+# This file configures the ML model training and prediction conflict prevention
+
+paths:
+  data_root: 'athlete_training_data'
+  game_data_root: 'athlete_game_data'
+  prediction_outputs: 'prediction_outputs'
+  models_root: 'athlete_models_pkl'
+  hb_tensors_updated: 'athlete_models_tensors_updated'
+  hb_tensors_previous: 'athlete_models_tensors_previous'
+  data_file_pattern: '*.csv'
+  model_path: 'rf_model.pkl'
+  hb_path: 'hb_rf_model.zip'
+  onnx_path: 'rf_model.onnx'
+
+training:
+  n_estimators: 80             # Reduced for faster training on Jetson
+  max_depth: 6                 # Reduced for memory efficiency
+  min_samples_split: 8         # Increased for simpler trees
+  min_samples_leaf: 15         # Increased for better generalization
+  random_state: 42
+  n_jobs: 2                    # Use 2 cores (leave 2 for system)
+  sessions_to_use: 2           # Use 2 sessions instead of 3 (less memory)
+  min_sessions_required: 2
+
+monitoring:
+  poll_interval_secs: 10
+  debounce_secs: 3
+  auto_update_enabled: true
+
+jetson:
+  device_detection: true
+  memory_limit_mb: 1800        # Reduced for 4GB system (leave ~2GB for OS)
+  batch_size: 500              # Smaller batches for memory efficiency
+  use_mixed_precision: true    # Enable for memory savings
+  gpu_memory_fraction: 0.5     # Conservative GPU memory usage
+
+backup:
+  enabled: true
+  keep_previous_versions: 3
+  backup_on_update: true
+
+retraining:
+  accuracy_threshold: 0.85
+  min_samples_threshold: 500
+  force_retrain_on_new_data: true
+
+logging:
+  level: 'INFO'
+  log_to_file: true
+  log_file: 'jetson_training.log'
+  console_output: true
+  detailed_progress: true
+  logs_dir: './logs'
+
+feature_engineering:
+  enabled: true
+  rolling_window: 10
+  sampling_frequency: 10
+  features:
+    resultant: true
+    rolling_stats: true
+    jerk: true
+    fft_features: true
+    acc_components: ['acc_x', 'acc_y', 'acc_z']
+
+# Prediction Conflict Prevention Configuration
+prediction_check:
+  # Enable/disable the prediction conflict checking
+  enabled: true
+  
+  # List of prediction script names to check for
+  prediction_script_names: 
+    - 'test_30_players.py'
+    - 'test_deployment1.py'
+  
+  # Path to the lockfile used by prediction scripts
+  lockfile_path: '.prediction_running.lock'
+  
+  # How often to check if prediction has stopped (seconds)
+  check_interval_secs: 5
+  
+  # Maximum time to wait for prediction to stop (seconds)
+  max_wait_time_secs: 300
+  
+  # Force training to proceed even if prediction is running (DANGEROUS!)
+  # Only set to true if you understand the risks of model conflicts
+  force_training: false
