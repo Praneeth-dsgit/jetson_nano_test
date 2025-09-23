@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Multi-Mode Data Publisher for Athlete Monitoring
+Multi-Mode Data Publisher for Athlete Monitoring:
 
 Supports two distinct modes:
 1. TRAINING MODE: Structured training sessions with predictable patterns

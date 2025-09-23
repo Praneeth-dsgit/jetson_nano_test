@@ -27,7 +27,7 @@ with open('jetson_config.yaml', 'r') as f:
 
 logs_dir = config['logging']['logs_dir']
 
-# --- Multi-device state ---
+# --- Multi-device state ----
 # Keep per-device processing context so we can handle multiple devices concurrently
 device_contexts = {}
 current_mode = "unknown"  # Track current mode (training/game)
