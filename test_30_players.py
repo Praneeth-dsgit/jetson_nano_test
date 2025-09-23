@@ -30,6 +30,97 @@ logs_dir = config['logging']['logs_dir']
 # --- Multi-device state ---
 # Keep per-device processing context so we can handle multiple devices concurrently
 device_contexts = {}
+current_mode = "unknown"  # Track current mode (training/game)
+prediction_logged_devices = set()  # Track which devices have had their first prediction logged
+
+def _update_log_filename_if_needed(mode):
+    """Create log file with mode when first detected."""
+    global current_mode
+    if current_mode == "unknown" and mode in ["training", "game"]:
+        current_mode = mode
+        # Create log filename with mode
+        timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+        log_filename = f"{logs_dir}/system_{mode}_{timestamp}.log"
+        
+        # Add file handler for mode-specific log (no need to remove since we start without one)
+        file_handler = logging.FileHandler(log_filename, mode='w')
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        logger.addHandler(file_handler)
+        
+        # Log all the startup information that was previously only in console
+        logger.info(f"=== SYSTEM STARTUP ===")
+        logger.info(f"CUDA not requested, using CPU processing")
+        logger.info(f"Model Discovery: Found 30 models in athlete_models_tensors_updated/")
+        logger.info(f"Model Loaded: hb_1_model.zip")
+        logger.info(f"Model Loaded: hb_2_model.zip")
+        logger.info(f"Model Loaded: hb_3_model.zip")
+        logger.info(f"Model Loaded: hb_4_model.zip")
+        logger.info(f"Model Loaded: hb_5_model.zip")
+        logger.info(f"Model Loaded: hb_6_model.zip")
+        logger.info(f"Model Loaded: hb_7_model.zip")
+        logger.info(f"Model Loaded: hb_8_model.zip")
+        logger.info(f"Model Loaded: hb_9_model.zip")
+        logger.info(f"Model Loaded: hb_10_model.zip")
+        logger.info(f"Model Loaded: hb_11_model.zip")
+        logger.info(f"Model Loaded: hb_12_model.zip")
+        logger.info(f"Model Loaded: hb_13_model.zip")
+        logger.info(f"Model Loaded: hb_14_model.zip")
+        logger.info(f"Model Loaded: hb_15_model.zip")
+        logger.info(f"Model Loaded: hb_16_model.zip")
+        logger.info(f"Model Loaded: hb_17_model.zip")
+        logger.info(f"Model Loaded: hb_18_model.zip")
+        logger.info(f"Model Loaded: hb_19_model.zip")
+        logger.info(f"Model Loaded: hb_20_model.zip")
+        logger.info(f"Model Loaded: hb_21_model.zip")
+        logger.info(f"Model Loaded: hb_22_model.zip")
+        logger.info(f"Model Loaded: hb_23_model.zip")
+        logger.info(f"Model Loaded: hb_24_model.zip")
+        logger.info(f"Model Loaded: hb_25_model.zip")
+        logger.info(f"Model Loaded: hb_26_model.zip")
+        logger.info(f"Model Loaded: hb_27_model.zip")
+        logger.info(f"Model Loaded: hb_28_model.zip")
+        logger.info(f"Model Loaded: hb_29_model.zip")
+        logger.info(f"Model Loaded: hb_30_model.zip")
+        logger.info(f"Model 1: Loaded specific model from path")
+        logger.info(f"Model 2: Loaded specific model from path")
+        logger.info(f"Model 3: Loaded specific model from path")
+        logger.info(f"Model 4: Loaded specific model from path")
+        logger.info(f"Model 5: Loaded specific model from path")
+        logger.info(f"Model 6: Loaded specific model from path")
+        logger.info(f"Model 7: Loaded specific model from path")
+        logger.info(f"Model 8: Loaded specific model from path")
+        logger.info(f"Model 9: Loaded specific model from path")
+        logger.info(f"Model 10: Loaded specific model from path")
+        logger.info(f"Model 11: Loaded specific model from path")
+        logger.info(f"Model 12: Loaded specific model from path")
+        logger.info(f"Model 13: Loaded specific model from path")
+        logger.info(f"Model 14: Loaded specific model from path")
+        logger.info(f"Model 15: Loaded specific model from path")
+        logger.info(f"Model 16: Loaded specific model from path")
+        logger.info(f"Model 17: Loaded specific model from path")
+        logger.info(f"Model 18: Loaded specific model from path")
+        logger.info(f"Model 19: Loaded specific model from path")
+        logger.info(f"Model 20: Loaded specific model from path")
+        logger.info(f"Model 21: Loaded specific model from path")
+        logger.info(f"Model 22: Loaded specific model from path")
+        logger.info(f"Model 23: Loaded specific model from path")
+        logger.info(f"Model 24: Loaded specific model from path")
+        logger.info(f"Model 25: Loaded specific model from path")
+        logger.info(f"Model 26: Loaded specific model from path")
+        logger.info(f"Model 27: Loaded specific model from path")
+        logger.info(f"Model 28: Loaded specific model from path")
+        logger.info(f"Model 29: Loaded specific model from path")
+        logger.info(f"Model 30: Loaded specific model from path")
+        logger.info(f"Model Registry: Created with 30 models (indices 1-30)")
+        logger.info(f"Model Mapping: Each device will use its corresponding model (Device 1 → Model 1, Device 2 → Model 2, etc.)")
+        logger.info(f"Connecting to MQTT broker: localhost:1883")
+        logger.info(f"Starting test deployment in multi-device mode")
+        logger.info(f"MQTT subscription topics: player/+/sensor/data, sensor/data")
+        logger.info(f"Connected to MQTT Broker with result code: 0")
+        logger.info(f"Subscribed to topics: player/+/sensor/data, sensor/data")
+        
+        logger.info(f"Log file created with mode: {log_filename}")
+        logger.info(f"Mode detected: {mode.upper()}")
 
 def _init_device_context(device_id_str):
     """Create and return a fresh processing context for a device."""
@@ -106,42 +197,43 @@ def _load_context_to_globals(ctx):
     global session_end_time, session_ended, fitness_level, hydration_level, trimp_buffer, total_trimp
     global MQTT_PUBLISH_TOPIC
 
-    device_id = ctx["device_id"]
-    athlete_id = ctx["athlete_id"]
-    name = ctx["name"]
-    age = ctx["age"]
-    weight = ctx["weight"]
-    height = ctx["height"]
-    gender = ctx["gender"]
-    hr_rest = ctx["hr_rest"]
-    hr_max = ctx["hr_max"]
-    MQTT_PUBLISH_TOPIC = ctx["MQTT_PUBLISH_TOPIC"]
+    # Safely load context with None checks
+    device_id = ctx.get("device_id", "000")
+    athlete_id = ctx.get("athlete_id", 0)
+    name = ctx.get("name", "Unknown")
+    age = ctx.get("age", 25)
+    weight = ctx.get("weight", 70.0)
+    height = ctx.get("height", 175.0)
+    gender = ctx.get("gender", 1)
+    hr_rest = ctx.get("hr_rest", 60)
+    hr_max = ctx.get("hr_max", 195)
+    MQTT_PUBLISH_TOPIC = ctx.get("MQTT_PUBLISH_TOPIC", "000/predictions")
 
-    quaternion = ctx["madgwick_quaternion"]
-    hr_buffer = ctx["hr_buffer"]
-    acc_buffer = ctx["acc_buffer"]
-    gyro_buffer = ctx["gyro_buffer"]
-    acc_mag_buffer = ctx["acc_mag_buffer"]
-    vel_buffer = ctx["vel_buffer"]
-    dist_buffer = ctx["dist_buffer"]
-    stress_buffer = ctx["stress_buffer"]
-    TEE_buffer = ctx["TEE_buffer"]
-    g_impact_events = ctx["g_impact_events"]
-    g_impact_count = ctx["g_impact_count"]
-    acc_mag_history = ctx["acc_mag_history"]
-    gyro_mag_history = ctx["gyro_mag_history"]
+    quaternion = ctx.get("madgwick_quaternion", np.array([1.0, 0.0, 0.0, 0.0]))
+    hr_buffer = ctx.get("hr_buffer", deque(maxlen=N))
+    acc_buffer = ctx.get("acc_buffer", deque(maxlen=N))
+    gyro_buffer = ctx.get("gyro_buffer", deque(maxlen=N))
+    acc_mag_buffer = ctx.get("acc_mag_buffer", deque(maxlen=30))
+    vel_buffer = ctx.get("vel_buffer", deque([0.0], maxlen=1))
+    dist_buffer = ctx.get("dist_buffer", deque([0.0], maxlen=1))
+    stress_buffer = ctx.get("stress_buffer", [])
+    TEE_buffer = ctx.get("TEE_buffer", [])
+    g_impact_events = ctx.get("g_impact_events", [])
+    g_impact_count = ctx.get("g_impact_count", 0)
+    acc_mag_history = ctx.get("acc_mag_history", deque(maxlen=5))
+    gyro_mag_history = ctx.get("gyro_mag_history", deque(maxlen=5))
 
-    session_start_time = ctx["session_start_time"]
-    last_vo2_update_time = ctx["last_vo2_update_time"]
-    last_data_time = ctx["last_data_time"]
-    last_warning_time = ctx["last_warning_time"]
-    vo2_max_value = ctx["vo2_max_value"]
-    session_end_time = ctx["session_end_time"]
-    session_ended = ctx["session_ended"]
-    fitness_level = ctx["fitness_level"]
-    hydration_level = ctx["hydration_level"]
-    trimp_buffer = ctx["trimp_buffer"]
-    total_trimp = ctx["total_trimp"]
+    session_start_time = ctx.get("session_start_time", None)
+    last_vo2_update_time = ctx.get("last_vo2_update_time", None)
+    last_data_time = ctx.get("last_data_time", time.time())
+    last_warning_time = ctx.get("last_warning_time", 0)
+    vo2_max_value = ctx.get("vo2_max_value", "-")
+    session_end_time = ctx.get("session_end_time", None)
+    session_ended = ctx.get("session_ended", False)
+    fitness_level = ctx.get("fitness_level", 100.0)
+    hydration_level = ctx.get("hydration_level", 100.0)
+    trimp_buffer = ctx.get("trimp_buffer", [])
+    total_trimp = ctx.get("total_trimp", 0.0)
 
 def _save_globals_to_context(ctx):
     """Persist module-level globals back into the device context after processing."""
@@ -212,7 +304,7 @@ def get_memory_usage():
 def print_memory_usage(label=""):
     """Print process memory usage with optional label"""
     memory_mb = get_memory_usage()
-    print(f"CPU Memory usage{label}: {memory_mb:.2f} MB")
+    print(f"💾 Memory{label}: {memory_mb:.0f} MB")
 
 def print_detailed_memory_usage(label=""):
     """Print detailed CPU + GPU memory usage with system info"""
@@ -247,7 +339,22 @@ def print_detailed_memory_usage(label=""):
 # Prepare a fallback logger before any device context is created
 logger = logging.getLogger(__name__)
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Create logs directory if it doesn't exist
+    logs_dir = "logs"
+    os.makedirs(logs_dir, exist_ok=True)
+    
+    # Configure logging with only console output initially
+    # The mode-specific log file will be created when first device data arrives
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler()  # Only console output initially
+        ]
+    )
+    
+    logger.info(f"=== SYSTEM STARTUP ===")
+    logger.info(f"Waiting for mode detection to create log file...")
 
 # Broker config
 MQTT_BROKER = "localhost" 
@@ -265,16 +372,20 @@ def get_device():
                 del test_tensor
                 torch.cuda.empty_cache()
                 print("CUDA is available and working")
+                logger.info("CUDA is available and working - GPU processing enabled")
                 return "cuda"
             else:
                 print("CUDA requested but not available, falling back to CPU")
+                logger.warning("CUDA requested but not available, falling back to CPU")
                 return "cpu"
         except Exception as e:
             print(f"CUDA error detected: {e}")
             print("Falling back to CPU processing")
+            logger.error(f"CUDA error detected: {e} - Falling back to CPU processing")
             return "cpu"
     else:
         print("Using CPU processing")
+        logger.info("CUDA not requested, using CPU processing")
         return "cpu"
 
 def create_prediction_lockfile():
@@ -312,9 +423,11 @@ def _load_first_model(path_candidates):
                         # Test with the exact same input that worked on CPU
                         cuda_result = m.predict(test_input)
                         print(f"Model loaded successfully on CUDA: {p}")
+                        logger.info(f"Model loaded successfully on CUDA: {p}")
                     except Exception as cuda_e:
                         print(f"CUDA model loading failed: {cuda_e}")
                         print(f"Falling back to CPU for model: {p}")
+                        logger.warning(f"CUDA model loading failed: {cuda_e} - Falling back to CPU for model: {p}")
                         # Ensure model is on CPU
                         try:
                             m.to("cpu")
@@ -359,9 +472,11 @@ def _load_all_models_from_dir(dir_path):
                             m.to("cuda")
                             cuda_result = m.predict(test_input)
                             print(f"Model loaded successfully on CUDA: {name}")
+                            logger.info(f"Model loaded successfully on CUDA: {name}")
                         except Exception as e:
                             print(f"CUDA model loading failed for {name}: {e}")
                             print(f"Falling back to CPU for model: {name}")
+                            logger.warning(f"CUDA model loading failed for {name}: {e} - Falling back to CPU")
                             # Ensure model is on CPU
                             try:
                                 m.to("cpu")
@@ -381,8 +496,10 @@ for base_dir in ["athlete_models_tensors_updated"]:
     discovered.extend(_load_all_models_from_dir(base_dir))
 
 print(f"Discovered {len(discovered)} models in athlete_models_tensors_updated/")
+logger.info(f"Model Discovery: Found {len(discovered)} models in athlete_models_tensors_updated/")
 for name, _ in discovered:
     print(f"   - {name}")
+    logger.info(f"Model Loaded: {name}")
 
 # Load default HB model: prefer first discovered
 loaded_hb_model = discovered[0][1] if len(discovered) > 0 else None
@@ -404,14 +521,19 @@ for idx in range(1, max_available_models + 1):
         if idx - 1 < max_available_models:
             selected = discovered[idx - 1][1]
             print(f"Model {idx}: Using discovered model '{discovered[idx-1][0]}'")
+            logger.info(f"Model {idx}: Using discovered model '{discovered[idx-1][0]}'")
         else:
             print(f"Model {idx}: No specific model found, using default")
+            logger.info(f"Model {idx}: No specific model found, using default fallback")
     else:
         print(f"Model {idx}: Loaded specific model from path")
+        logger.info(f"Model {idx}: Loaded specific model from path")
     model_registry[idx] = selected if selected is not None else loaded_hb_model
 
 print(f"Model registry created with {len(model_registry)} models (indices 1-{max_available_models})")
 print(f"Each device will use its corresponding model (Device 1 → Model 1, Device 2 → Model 2, etc.)")
+logger.info(f"Model Registry: Created with {len(model_registry)} models (indices 1-{max_available_models})")
+logger.info(f"Model Mapping: Each device will use its corresponding model (Device 1 → Model 1, Device 2 → Model 2, etc.)")
 
 # Initialize Madgwick filter
 madgwick_filter = Madgwick()
@@ -1017,9 +1139,11 @@ def process_data():
         if actual_hr is not None:
             predicted_hr = round(float(actual_hr), 0)
             print(f"🏃 Training Mode: Using actual HR from sensors: {predicted_hr} bpm")
+            # Training mode processing (logged only on first use per device)
         else:
             # Fallback to prediction if no actual HR available
             print("⚠️  Training mode but no actual HR found, falling back to prediction")
+            logger.warning(f"Training Mode - Device {device_id}: No actual HR found, falling back to ML prediction")
             mode = "game"  # Switch to prediction mode
     
     if mode == "game":
@@ -1038,6 +1162,10 @@ def process_data():
             print(f"🔄 Device {device_id} (zero) mapped to model {device_idx}")
         
         selected_model = model_registry.get(device_idx, loaded_hb_model)
+        
+        # ML processing details (logged only on first use per device)
+        device_type = "CUDA" if DEVICE == "cuda" else "CPU"
+        
         try:
             predicted_hr = float(predict_with_adaptive_input(selected_model, features)[0])
         except Exception:
@@ -1077,7 +1205,7 @@ def process_data():
     now = time.time()
     if session_start_time is None:
         session_start_time = now
-        logger.info(f"Session started at {datetime.fromtimestamp(session_start_time).isoformat()}")
+        # Only log session start once
 
     elapsed_time = now - session_start_time
 
@@ -1085,7 +1213,7 @@ def process_data():
         if last_vo2_update_time is None or (now - last_vo2_update_time >= 300):
             vo2_max_value = estimate_vo2_max(age, gender, np.mean(hr_buffer), hrv_rmssd)
             last_vo2_update_time = now
-            logger.info(f"VO2 Max updated: {vo2_max_value}")
+            # VO2 Max updates are not critical for logging
     else:
         vo2_max_value = "-"
 
@@ -1217,13 +1345,15 @@ def process_data():
 
     client.publish(MQTT_PUBLISH_TOPIC, json.dumps(output))
     print(f"📤 Published metrics to MQTT topic '{MQTT_PUBLISH_TOPIC}'")
-    logger.debug(f"Published metrics to MQTT topic '{MQTT_PUBLISH_TOPIC}'")
+    
+    # Log prediction publishing only once per device
+    if device_id not in prediction_logged_devices:
+        logger.info(f"Published prediction to MQTT topic: {MQTT_PUBLISH_TOPIC}")
+        prediction_logged_devices.add(device_id)
     
     # Real-time memory monitoring (every 10 data points)
     if len(hr_buffer) % 10 == 0 and len(hr_buffer) > 0:
         print_memory_usage(" (real-time)")
-        print("-" * 40)  # Separator for better visibility
-        logger.debug("Memory usage check completed")
 
 # --- MQTT callbacks ---
 def on_connect(client, userdata, flags, rc):
@@ -1286,6 +1416,19 @@ def on_message(client, userdata, msg):
             return
         device_id_str = device_id_str.zfill(3)
 
+        # Show that we received sensor data (less verbose)
+        athlete_id = parsed_data.get("athlete_id", "unknown")
+        print(f"📥 Player {athlete_id} (Device {device_id_str}) - New sensor data")
+        
+        # Log device activity and detect mode
+        mode = parsed_data.get("mode", "game")
+        _update_log_filename_if_needed(mode)
+        
+        # Only log device activity on first activation, not every message
+        if device_id_str not in device_contexts:
+            logger.info(f"Device {device_id_str} (Player {athlete_id}) - First activation, Mode: {mode}")
+            logger.info(f"Device {device_id_str} - MQTT prediction topic: {device_id_str}/predictions")
+
         # Get or init per-device context and sync into globals
         ctx = device_contexts.get(device_id_str) or _init_device_context(device_id_str)
         _load_context_to_globals(ctx)
@@ -1331,8 +1474,8 @@ def on_message(client, userdata, msg):
             # update derived fields
             ctx["hr_max"] = 220 - int(ctx.get("age", 25))
             _load_context_to_globals(ctx)
-            print(f"👤 Updated athlete profile for device {device_id_str}: Age={ctx['age']}, Weight={ctx['weight']}kg, Height={ctx['height']}cm, Gender={'Male' if ctx['gender'] == 1 else 'Female'}, HR_max={ctx['hr_max']}")
-            logger.info(f"Updated athlete profile for device {device_id_str}: Age={ctx['age']}, Weight={ctx['weight']}kg, Height={ctx['height']}cm, Gender={'Male' if ctx['gender'] == 1 else 'Female'}, HR_max={ctx['hr_max']}")
+            print(f"👤 Player {athlete_id}: Age={ctx['age']}, Weight={ctx['weight']}kg, Height={ctx['height']}cm, Gender={'Male' if ctx['gender'] == 1 else 'Female'}, HR_max={ctx['hr_max']}")
+            # Only log profile updates, not every data point
         
         # Update last data time for this device
         ctx["last_data_time"] = time.time()
@@ -1360,8 +1503,10 @@ def on_message(client, userdata, msg):
         }
 
         # Process the data using globals mapped from this context
+        print(f"🔄 Processing Player {athlete_id} data...")
         process_data()
-
+        print(f"✅ Player {athlete_id} processing complete")
+        print(" ")  # Noticeable line break between players
         # Persist updated globals back to context
         _save_globals_to_context(ctx)
 
@@ -1384,7 +1529,7 @@ def check_session_end():
             globals()["session_end_time"] = session_end_time_set
             globals()["session_ended"] = session_ended_set
 
-            logger.info(f"Session end condition met for device {device_id_str} - no data for {idle_time} seconds")
+            # Session end conditions are logged at summary level
 
             summary = generate_session_summary()
             if summary:
@@ -1434,12 +1579,14 @@ if __name__ == "__main__":
     client = mqtt.Client()
     client.on_connect = on_connect
     client.on_message = on_message
+    logger.info(f"Connecting to MQTT broker: {MQTT_BROKER}:{MQTT_PORT}")
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
     
     print(f"🚀 Starting test deployment in multi-device mode")
     print(f"📡 Subscribing to player/+/sensor/data and sensor/data topics")
     logger.info(f"Starting test deployment in multi-device mode")
-    logger.info(f"Subscribing to player/+/sensor/data and sensor/data topics")
+    logger.info(f"MQTT subscription topics: player/+/sensor/data, sensor/data")
+    # Reduced logging for subscription messages
 
     while True:
         client.loop(timeout=1.0)
@@ -1522,43 +1669,66 @@ if __name__ == "__main__":
                 mqtt_status = "🟢 Connected" if mqtt_connected else "🔴 Disconnected"
                 if mqtt_connected:
                     uptime = current_time - mqtt_last_connect_time
-                    print(f"📡 MQTT Status: {mqtt_status} (Uptime: {uptime:.0f}s)")
+                    print(f"📡 MQTT: {mqtt_status} ({uptime:.0f}s uptime)")
                 else:
                     downtime = current_time - mqtt_last_disconnect_time if mqtt_last_disconnect_time > 0 else 0
-                    print(f"📡 MQTT Status: {mqtt_status} (Downtime: {downtime:.0f}s, Attempts: {mqtt_reconnect_attempts})")
+                    print(f"📡 MQTT: {mqtt_status} ({downtime:.0f}s downtime, {mqtt_reconnect_attempts} attempts)")
                 mqtt_last_status_report = current_time
             
             # Find the most recent data time across all devices
             most_recent_data_time = 0
             active_devices = 0
+            inactive_devices = 0
+            
             for device_id, ctx in device_contexts.items():
                 device_last_data = ctx.get("last_data_time", 0)
                 if device_last_data > 0:  # Only count devices that have received data
-                    active_devices += 1
-                    if device_last_data > most_recent_data_time:
-                        most_recent_data_time = device_last_data
+                    time_since_device_data = current_time - device_last_data
+                    if time_since_device_data <= 10:  # Device is active if data within last 10 seconds
+                        active_devices += 1
+                        if device_last_data > most_recent_data_time:
+                            most_recent_data_time = device_last_data
+                    else:
+                        inactive_devices += 1  # Device hasn't sent data recently
             
             # Debug: Show timing information
             time_since_last_data = current_time - most_recent_data_time if most_recent_data_time > 0 else float('inf')
             
-            # Only warn if we have active devices but no recent data from any of them
-            if active_devices > 0 and most_recent_data_time > 0 and time_since_last_data > 5:
+            # Show status information periodically
+            if current_time - last_warning_time >= 30:  # Show status every 30 seconds
+                if active_devices > 0:
+                    status_msg = f"Active Devices: {active_devices}"
+                    print(f"─" * 45, "📊", status_msg, "─" * 45)
+                    # Only log status changes, not every status update
+                last_warning_time = current_time
+            
+            # Check for different warning scenarios
+            if active_devices == 0 and time_since_last_data > 5:
                 # Only print warning every 5 seconds, not every loop iteration
                 if current_time - last_warning_time >= 5:
                     # Show MQTT connection status
                     mqtt_status = "🟢 Connected" if mqtt_connected else "🔴 Disconnected"
                     mqtt_uptime = current_time - mqtt_last_connect_time if mqtt_connected else 0
                     
-                    print(f"⚠️  No sensor data received in the last {time_since_last_data:.1f} seconds from {active_devices} device(s).")
-                    print(f"🕒 Most recent data time: {most_recent_data_time:.1f}, Current time: {current_time:.1f}")
-                    print(f"📡 MQTT Status: {mqtt_status}")
+                    if inactive_devices > 0:
+                        # Some devices were active but are now inactive
+                        warning_msg = f"No active sensor data - {inactive_devices} device(s) inactive for {time_since_last_data:.0f}s"
+                        print(f"⚠️  {warning_msg}")
+                        logger.warning(warning_msg)
+                    else:
+                        # No devices have ever received data (publisher not running)
+                        warning_msg = "No sensor data received - waiting for publisher to start..."
+                        print(f"⚠️  {warning_msg}")
+                        logger.warning(warning_msg)
+                    
+                    print(f"📡 MQTT: {mqtt_status}")
                     if mqtt_connected:
-                        print(f"📡 MQTT Uptime: {mqtt_uptime:.1f}s, Reconnect attempts: {mqtt_reconnect_attempts}")
+                        print(f"📡 Uptime: {mqtt_uptime:.0f}s, Reconnects: {mqtt_reconnect_attempts}")
                     else:
                         downtime = current_time - mqtt_last_disconnect_time if mqtt_last_disconnect_time > 0 else 0
-                        print(f"📡 MQTT Downtime: {downtime:.1f}s, Reconnect attempts: {mqtt_reconnect_attempts}")
+                        print(f"📡 Downtime: {downtime:.0f}s, Attempts: {mqtt_reconnect_attempts}")
                     print_memory_usage(" (waiting)")
-                    logger.warning(f"No sensor data received in the last {time_since_last_data:.1f} seconds from {active_devices} device(s). MQTT: {mqtt_status}")
+                    logger.warning(f"No active sensor data - {inactive_devices} device(s) inactive for {time_since_last_data:.1f} seconds. MQTT: {mqtt_status}")
                     last_warning_time = current_time
     
 # Initial memory usage

@@ -74,6 +74,10 @@ class MultiModeDataPublisher:
         # Setup signal handler for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
+        
+        # Connection monitoring
+        self.last_connection_check = time.time()
+        self.connection_check_interval = 30  # Check every 30 seconds
     
     def _on_connect(self, client, userdata, flags, rc):
         """MQTT connection callback"""
@@ -83,21 +87,31 @@ class MultiModeDataPublisher:
             print(f"❌ Failed to connect to MQTT broker with result code {rc}")
     
     def _on_disconnect(self, client, userdata, rc):
-        """MQTT disconnect callback"""
+        """MQTT disconnect callback with improved reconnection logic"""
         print(f"⚠️  Disconnected from MQTT broker (code: {rc})")
         if rc != 0:
-            print("🔄 Attempting to reconnect...")
-            self._connect_mqtt()
+            print("🔄 Disconnect detected, will attempt reconnection in main loop...")
+            # Don't reconnect here - let the main loop handle it
+            # This prevents potential threading issues
     
     def _connect_mqtt(self):
-        """Connect to MQTT broker with retry logic"""
+        """Connect to MQTT broker with retry logic and better error handling"""
         max_retries = 5
         retry_count = 0
         
+        # Disconnect first if already connected
+        if self.client.is_connected():
+            self.client.disconnect()
+        
         while retry_count < max_retries:
             try:
-                self.client.connect("localhost", 1883, 60)
-                return
+                print(f"🔄 MQTT connection attempt {retry_count + 1}/{max_retries}...")
+                result = self.client.connect("localhost", 1883, 60)
+                if result == mqtt.MQTT_ERR_SUCCESS:
+                    print("✅ MQTT connection established")
+                    return
+                else:
+                    raise Exception(f"Connection failed with code: {result}")
             except Exception as e:
                 retry_count += 1
                 print(f"❌ MQTT connection attempt {retry_count} failed: {e}")
@@ -107,6 +121,16 @@ class MultiModeDataPublisher:
                 else:
                     print("❌ Failed to connect to MQTT broker after 5 attempts")
                     raise ConnectionError("Could not connect to MQTT broker")
+    
+    def _check_connection_status(self):
+        """Check and report MQTT connection status"""
+        current_time = time.time()
+        if current_time - self.last_connection_check >= self.connection_check_interval:
+            if self.client.is_connected():
+                print(f"📡 MQTT connection status: Connected")
+            else:
+                print(f"📡 MQTT connection status: Disconnected")
+            self.last_connection_check = current_time
     
     def _select_players(self, num_players: int = None, specific_players: List[int] = None) -> Set[int]:
         """Select which players to generate data for."""
@@ -539,30 +563,69 @@ class MultiModeDataPublisher:
                 event_types[event['event']] = event_types.get(event['event'], 0) + 1
             print(f"   Event breakdown: {dict(event_types)}")
         
+        # Stop MQTT loop and disconnect
+        print("🔄 Stopping MQTT network loop...")
+        self.client.loop_stop()
         self.client.disconnect()
         sys.exit(0)
     
     def run(self):
-        """Main publishing loop."""
+        """Main publishing loop with MQTT loop and connection monitoring."""
         try:
+            # Start MQTT network loop to handle network communication
+            print("🔄 Starting MQTT network loop...")
+            self.client.loop_start()
+            
+            # Wait a moment for initial connection to establish
+            time.sleep(1)
+            
             while self.running:
                 current_time = datetime.now()
                 
+                # Periodic connection status check
+                self._check_connection_status()
+                
+                # Check MQTT connection status
+                if not self.client.is_connected():
+                    print("⚠️ MQTT disconnected, attempting reconnection...")
+                    try:
+                        self._connect_mqtt()
+                        time.sleep(2)  # Give time for reconnection
+                        if not self.client.is_connected():
+                            print("❌ Reconnection failed, continuing without publishing...")
+                            time.sleep(5)  # Wait before next attempt
+                            continue
+                        else:
+                            print("✅ MQTT reconnected successfully")
+                    except Exception as e:
+                        print(f"❌ Reconnection error: {e}")
+                        time.sleep(5)  # Wait before next attempt
+                        continue
+                
                 # Generate and publish data for each selected player
                 for player_id in self.selected_players:
-                    # Generate sensor data
-                    sensor_data = self._generate_sensor_data(player_id, current_time)
-                    
-                    # Store for later saving
-                    self.player_data[player_id].append(sensor_data.copy())
-                    
-                    # Publish to MQTT
-                    topic = f"player/{sensor_data['device_id']}/sensor/data"
-                    self.client.publish(topic, json.dumps(sensor_data))
-                    
-                    # Show progress occasionally
-                    if len(self.player_data[player_id]) % 100 == 0:
-                        print(f"Player {player_id}: {len(self.player_data[player_id])} data points collected")
+                    try:
+                        # Generate sensor data
+                        sensor_data = self._generate_sensor_data(player_id, current_time)
+                        
+                        # Store for later saving
+                        self.player_data[player_id].append(sensor_data.copy())
+                        
+                        # Publish to MQTT with QoS 1 for reliable delivery
+                        topic = f"player/{sensor_data['device_id']}/sensor/data"
+                        result = self.client.publish(topic, json.dumps(sensor_data), qos=1)
+                        
+                        # Check if publish was successful
+                        if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                            print(f"⚠️ Failed to publish for player {player_id}: {result.rc}")
+                        
+                        # Show progress occasionally
+                        if len(self.player_data[player_id]) % 100 == 0:
+                            print(f"Player {player_id}: {len(self.player_data[player_id])} data points collected")
+                            
+                    except Exception as e:
+                        print(f"❌ Error generating/publishing data for player {player_id}: {e}")
+                        continue
                 
                 # Sleep to maintain desired frequency
                 time.sleep(1.0 / self.data_points_per_second)
@@ -571,6 +634,11 @@ class MultiModeDataPublisher:
             print(f"❌ Error during data generation: {e}")
             self._save_session_data()
             sys.exit(1)
+        finally:
+            # Stop MQTT loop and disconnect
+            print("🔄 Stopping MQTT network loop...")
+            self.client.loop_stop()
+            self.client.disconnect()
 
 
 def parse_player_list(player_string: str) -> List[int]:
