@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-with open('jetson_config.yaml', 'r') as f:
+with open('jetson_nano_4gb_config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
 logs_dir = config['logging']['logs_dir']

@@ -19,10 +19,11 @@ from hummingbird.ml import convert, load
 import numpy as np
 import joblib
 from dotenv import load_dotenv
+from dynamic_model_loader import DynamicModelLoader
 
 load_dotenv()
 
-with open('jetson_config.yaml', 'r') as f:
+with open('jetson_nano_4gb_config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
 logs_dir = config['logging']['logs_dir']
@@ -50,70 +51,16 @@ def _update_log_filename_if_needed(mode):
         # Log all the startup information that was previously only in console
         logger.info(f"=== SYSTEM STARTUP ===")
         logger.info(f"CUDA not requested, using CPU processing")
-        logger.info(f"Model Discovery: Found 30 models in athlete_models_tensors_updated/")
-        logger.info(f"Model Loaded: hb_1_model.zip")
-        logger.info(f"Model Loaded: hb_2_model.zip")
-        logger.info(f"Model Loaded: hb_3_model.zip")
-        logger.info(f"Model Loaded: hb_4_model.zip")
-        logger.info(f"Model Loaded: hb_5_model.zip")
-        logger.info(f"Model Loaded: hb_6_model.zip")
-        logger.info(f"Model Loaded: hb_7_model.zip")
-        logger.info(f"Model Loaded: hb_8_model.zip")
-        logger.info(f"Model Loaded: hb_9_model.zip")
-        logger.info(f"Model Loaded: hb_10_model.zip")
-        logger.info(f"Model Loaded: hb_11_model.zip")
-        logger.info(f"Model Loaded: hb_12_model.zip")
-        logger.info(f"Model Loaded: hb_13_model.zip")
-        logger.info(f"Model Loaded: hb_14_model.zip")
-        logger.info(f"Model Loaded: hb_15_model.zip")
-        logger.info(f"Model Loaded: hb_16_model.zip")
-        logger.info(f"Model Loaded: hb_17_model.zip")
-        logger.info(f"Model Loaded: hb_18_model.zip")
-        logger.info(f"Model Loaded: hb_19_model.zip")
-        logger.info(f"Model Loaded: hb_20_model.zip")
-        logger.info(f"Model Loaded: hb_21_model.zip")
-        logger.info(f"Model Loaded: hb_22_model.zip")
-        logger.info(f"Model Loaded: hb_23_model.zip")
-        logger.info(f"Model Loaded: hb_24_model.zip")
-        logger.info(f"Model Loaded: hb_25_model.zip")
-        logger.info(f"Model Loaded: hb_26_model.zip")
-        logger.info(f"Model Loaded: hb_27_model.zip")
-        logger.info(f"Model Loaded: hb_28_model.zip")
-        logger.info(f"Model Loaded: hb_29_model.zip")
-        logger.info(f"Model Loaded: hb_30_model.zip")
-        logger.info(f"Model 1: Loaded specific model from path")
-        logger.info(f"Model 2: Loaded specific model from path")
-        logger.info(f"Model 3: Loaded specific model from path")
-        logger.info(f"Model 4: Loaded specific model from path")
-        logger.info(f"Model 5: Loaded specific model from path")
-        logger.info(f"Model 6: Loaded specific model from path")
-        logger.info(f"Model 7: Loaded specific model from path")
-        logger.info(f"Model 8: Loaded specific model from path")
-        logger.info(f"Model 9: Loaded specific model from path")
-        logger.info(f"Model 10: Loaded specific model from path")
-        logger.info(f"Model 11: Loaded specific model from path")
-        logger.info(f"Model 12: Loaded specific model from path")
-        logger.info(f"Model 13: Loaded specific model from path")
-        logger.info(f"Model 14: Loaded specific model from path")
-        logger.info(f"Model 15: Loaded specific model from path")
-        logger.info(f"Model 16: Loaded specific model from path")
-        logger.info(f"Model 17: Loaded specific model from path")
-        logger.info(f"Model 18: Loaded specific model from path")
-        logger.info(f"Model 19: Loaded specific model from path")
-        logger.info(f"Model 20: Loaded specific model from path")
-        logger.info(f"Model 21: Loaded specific model from path")
-        logger.info(f"Model 22: Loaded specific model from path")
-        logger.info(f"Model 23: Loaded specific model from path")
-        logger.info(f"Model 24: Loaded specific model from path")
-        logger.info(f"Model 25: Loaded specific model from path")
-        logger.info(f"Model 26: Loaded specific model from path")
-        logger.info(f"Model 27: Loaded specific model from path")
-        logger.info(f"Model 28: Loaded specific model from path")
-        logger.info(f"Model 29: Loaded specific model from path")
-        logger.info(f"Model 30: Loaded specific model from path")
-        logger.info(f"Model Registry: Created with 30 models (indices 1-30)")
-        logger.info(f"Model Mapping: Each device will use its corresponding model (Device 1 → Model 1, Device 2 → Model 2, etc.)")
-        logger.info(f"Connecting to MQTT broker: localhost:1883")
+        logger.info(f"Model Discovery: Found {len(discovered)} models in athlete_models_tensors_updated/")
+        
+        # Log discovered models dynamically
+        for name, _ in discovered:
+            logger.info(f"Model Loaded: {name}")
+        
+        # Log model registry creation dynamically
+        logger.info(f"Model Registry: Created with {len(model_registry)} models (indices 1-{max_available_models})")
+        logger.info(f"Model Mapping: Each device will use its corresponding model (Device 1 -> Model 1, Device 2 -> Model 2, etc.)")
+        logger.info(f"Connecting to MQTT broker: {MQTT_BROKER}:{MQTT_PORT}")
         logger.info(f"Starting test deployment in multi-device mode")
         logger.info(f"MQTT subscription topics: player/+/sensor/data, sensor/data")
         logger.info(f"Connected to MQTT Broker with result code: 0")
@@ -150,9 +97,9 @@ def _init_device_context(device_id_str):
         "MQTT_PUBLISH_TOPIC": f"{device_id_str}/predictions",
         # Filters and state
         "madgwick_quaternion": np.array([1.0, 0.0, 0.0, 0.0]),
-        "hr_buffer": deque(maxlen=N),
-        "acc_buffer": deque(maxlen=N),
-        "gyro_buffer": deque(maxlen=N),
+        "hr_buffer": deque(maxlen=ROLLING_WINDOW_SIZE),
+        "acc_buffer": deque(maxlen=ROLLING_WINDOW_SIZE),
+        "gyro_buffer": deque(maxlen=ROLLING_WINDOW_SIZE),
         "acc_mag_buffer": deque(maxlen=30),
         "vel_buffer": deque([0.0], maxlen=1),
         "dist_buffer": deque([0.0], maxlen=1),
@@ -170,9 +117,6 @@ def _init_device_context(device_id_str):
         "vo2_max_value": "-",
         "session_end_time": None,
         "session_ended": False,
-        # Vitals
-        "fitness_level": 100.0,
-        "hydration_level": 100.0,
         # TRIMP
         "trimp_buffer": [],
         "total_trimp": 0.0,
@@ -194,7 +138,7 @@ def _load_context_to_globals(ctx):
     global quaternion, hr_buffer, acc_buffer, gyro_buffer, acc_mag_buffer, vel_buffer, dist_buffer
     global stress_buffer, TEE_buffer, g_impact_events, g_impact_count, acc_mag_history, gyro_mag_history
     global session_start_time, last_vo2_update_time, last_data_time, last_warning_time, vo2_max_value
-    global session_end_time, session_ended, fitness_level, hydration_level, trimp_buffer, total_trimp
+    global session_end_time, session_ended, trimp_buffer, total_trimp
     global MQTT_PUBLISH_TOPIC
 
     # Safely load context with None checks
@@ -210,9 +154,9 @@ def _load_context_to_globals(ctx):
     MQTT_PUBLISH_TOPIC = ctx.get("MQTT_PUBLISH_TOPIC", "000/predictions")
 
     quaternion = ctx.get("madgwick_quaternion", np.array([1.0, 0.0, 0.0, 0.0]))
-    hr_buffer = ctx.get("hr_buffer", deque(maxlen=N))
-    acc_buffer = ctx.get("acc_buffer", deque(maxlen=N))
-    gyro_buffer = ctx.get("gyro_buffer", deque(maxlen=N))
+    hr_buffer = ctx.get("hr_buffer", deque(maxlen=ROLLING_WINDOW_SIZE))
+    acc_buffer = ctx.get("acc_buffer", deque(maxlen=ROLLING_WINDOW_SIZE))
+    gyro_buffer = ctx.get("gyro_buffer", deque(maxlen=ROLLING_WINDOW_SIZE))
     acc_mag_buffer = ctx.get("acc_mag_buffer", deque(maxlen=30))
     vel_buffer = ctx.get("vel_buffer", deque([0.0], maxlen=1))
     dist_buffer = ctx.get("dist_buffer", deque([0.0], maxlen=1))
@@ -230,8 +174,6 @@ def _load_context_to_globals(ctx):
     vo2_max_value = ctx.get("vo2_max_value", "-")
     session_end_time = ctx.get("session_end_time", None)
     session_ended = ctx.get("session_ended", False)
-    fitness_level = ctx.get("fitness_level", 100.0)
-    hydration_level = ctx.get("hydration_level", 100.0)
     trimp_buffer = ctx.get("trimp_buffer", [])
     total_trimp = ctx.get("total_trimp", 0.0)
 
@@ -262,8 +204,6 @@ def _save_globals_to_context(ctx):
     ctx["vo2_max_value"] = vo2_max_value
     ctx["session_end_time"] = session_end_time
     ctx["session_ended"] = session_ended
-    ctx["fitness_level"] = fitness_level
-    ctx["hydration_level"] = hydration_level
     ctx["trimp_buffer"] = trimp_buffer
     ctx["total_trimp"] = total_trimp
 
@@ -296,45 +236,112 @@ def setup_logging(athlete_id, device_id):
     return logger
 
 # Memory monitoring
-def get_memory_usage():
-    """Get current process memory usage in MB"""
-    process = psutil.Process(os.getpid())
-    return process.memory_info().rss / (1024 * 1024)
+def get_memory_status():
+    """
+    Get comprehensive memory status for both CPU and GPU.
+    
+    Returns:
+        dict: Memory status information including CPU and GPU details
+    """
+    try:
+        # CPU Memory
+        process = psutil.Process(os.getpid())
+        process_memory = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        virtual_mem = psutil.virtual_memory()
+        total_memory = virtual_mem.total / (1024 * 1024)  # MB
+        available_memory = virtual_mem.available / (1024 * 1024)  # MB
+        memory_percent = (process_memory / total_memory) * 100
+        system_usage = 100 - (available_memory / total_memory) * 100
+        
+        cpu_status = {
+            "process_memory_mb": round(process_memory, 2),
+            "process_memory_percent": round(memory_percent, 3),
+            "total_system_mb": round(total_memory, 0),
+            "available_mb": round(available_memory, 0),
+            "system_usage_percent": round(system_usage, 1)
+        }
+        
+        # GPU Memory
+        gpu_status = None
+        if torch.cuda.is_available():
+            try:
+                device = torch.cuda.current_device()
+                gpu_props = torch.cuda.get_device_properties(device)
+                allocated = torch.cuda.memory_allocated(device) / (1024 * 1024)
+                reserved = torch.cuda.memory_reserved(device) / (1024 * 1024)
+                total_gpu = gpu_props.total_memory / (1024 * 1024)
+                
+                gpu_status = {
+                    "device_name": gpu_props.name,
+                    "total_memory_mb": round(total_gpu, 0),
+                    "allocated_mb": round(allocated, 2),
+                    "reserved_mb": round(reserved, 2),
+                    "free_mb": round(total_gpu - reserved, 2),
+                    "usage_percent": round((reserved / total_gpu) * 100, 1)
+                }
+            except Exception as e:
+                gpu_status = {"error": f"GPU monitoring failed: {str(e)}"}
+        else:
+            gpu_status = {"status": "CUDA not available"}
+        
+        return {
+            "cpu": cpu_status,
+            "gpu": gpu_status,
+            "timestamp": time.time()
+        }
+        
+    except Exception as e:
+        return {"error": f"Memory monitoring failed: {str(e)}"}
 
-def print_memory_usage(label=""):
-    """Print process memory usage with optional label"""
-    memory_mb = get_memory_usage()
-    print(f"💾 Memory{label}: {memory_mb:.0f} MB")
+def print_memory_usage(label="", detailed=False):
+    """
+    Print memory usage information.
+    
+    Args:
+        label: Optional label for the memory report
+        detailed: If True, prints detailed CPU+GPU info; if False, prints simple process memory
+    """
+    try:
+        if detailed:
+            status = get_memory_status()
+            
+            if "error" in status:
+                print(f"❌ Memory monitoring error: {status['error']}")
+                return
+            
+            cpu = status["cpu"]
+            gpu = status["gpu"]
+            
+            print(f"\n==== MEMORY STATUS {label} ====")
+            print(f"CPU Process Memory: {cpu['process_memory_mb']} MB ({cpu['process_memory_percent']}% of system)")
+            print(f"CPU Total System:  {cpu['total_system_mb']} MB")
+            print(f"CPU Available:     {cpu['available_mb']} MB")
+            print(f"CPU Usage:         {cpu['system_usage_percent']}%")
+            
+            if "error" in gpu:
+                print(f"\nGPU Error: {gpu['error']}")
+            elif "status" in gpu:
+                print(f"\n{gpu['status']}")
+            else:
+                print(f"\nGPU Device:        {gpu['device_name']}")
+                print(f"GPU Total Memory:  {gpu['total_memory_mb']} MB")
+                print(f"GPU Allocated:     {gpu['allocated_mb']} MB")
+                print(f"GPU Reserved:      {gpu['reserved_mb']} MB")
+                print(f"GPU Free:          {gpu['free_mb']} MB")
+                print(f"GPU Usage:         {gpu['usage_percent']}%")
+        else:
+            # Simple memory usage
+            process = psutil.Process(os.getpid())
+            memory_mb = process.memory_info().rss / (1024 * 1024)
+            print(f"💾 Memory{label}: {memory_mb:.0f} MB")
+            
+    except Exception as e:
+        print(f"❌ Memory monitoring failed: {e}")
 
 def print_detailed_memory_usage(label=""):
-    """Print detailed CPU + GPU memory usage with system info"""
-    # ---- CPU memory ----
-    memory_mb = get_memory_usage()
-    total_memory = psutil.virtual_memory().total / (1024 * 1024)  # MB
-    available_memory = psutil.virtual_memory().available / (1024 * 1024)  # MB
-    memory_percent = (memory_mb / total_memory) * 100
-    
-    print(f"\n==== MEMORY STATUS {label} ====")
-    print(f"CPU Process Memory: {memory_mb:.2f} MB ({memory_percent:.3f}% of system)")
-    print(f"CPU Total System:  {total_memory:.0f} MB")
-    print(f"CPU Available:     {available_memory:.0f} MB")
-    print(f"CPU Usage:         {100 - (available_memory/total_memory)*100:.1f}%")
-
-    # ---- GPU memory ----
-    if torch.cuda.is_available():
-        device = torch.cuda.current_device()
-        gpu_props = torch.cuda.get_device_properties(device)
-        allocated = torch.cuda.memory_allocated(device) / (1024 * 1024)
-        reserved = torch.cuda.memory_reserved(device) / (1024 * 1024)
-        total_gpu = gpu_props.total_memory / (1024 * 1024)
-
-        print(f"\nGPU Device:        {gpu_props.name}")
-        print(f"GPU Total Memory:  {total_gpu:.0f} MB")
-        print(f"GPU Allocated:     {allocated:.2f} MB")
-        print(f"GPU Reserved:      {reserved:.2f} MB")
-        print(f"GPU Free:          {total_gpu - reserved:.2f} MB")
-    else:
-        print("\nNo GPU detected (CUDA not available).")
+    """Print detailed CPU + GPU memory usage with system info (legacy function for compatibility)"""
+    print_memory_usage(label, detailed=True)
 
 # Prepare a fallback logger before any device context is created
 logger = logging.getLogger(__name__)
@@ -361,6 +368,7 @@ MQTT_BROKER = "localhost"
 MQTT_PORT = 1883
 idle_time = os.getenv("IDLE_TIME", 300)
 USE_CUDA = os.getenv("USE_CUDA", "0")
+
 # Enhanced CUDA detection with better error handling
 def get_device():
     """Safely determine the best device to use."""
@@ -407,211 +415,206 @@ def remove_prediction_lockfile():
         print(f"[WARN] Failed to remove prediction lockfile: {e}")
 
 DEVICE = get_device()
-def _load_first_model(path_candidates):
-    for p in path_candidates:
-        try:
-            m = load(p, override_flag=True)
-            if DEVICE == "cuda":
-                try:
-                    # Test if the model can actually work on CUDA
-                    test_input = np.random.randn(1, 30).astype(np.float32)
-                    # Try CPU first to ensure model works
-                    cpu_result = m.predict(test_input)
-                    # Now try CUDA with more careful error handling
-                    try:
-                        m.to("cuda")
-                        # Test with the exact same input that worked on CPU
-                        cuda_result = m.predict(test_input)
-                        print(f"Model loaded successfully on CUDA: {p}")
-                        logger.info(f"Model loaded successfully on CUDA: {p}")
-                    except Exception as cuda_e:
-                        print(f"CUDA model loading failed: {cuda_e}")
-                        print(f"Falling back to CPU for model: {p}")
-                        logger.warning(f"CUDA model loading failed: {cuda_e} - Falling back to CPU for model: {p}")
-                        # Ensure model is on CPU
-                        try:
-                            m.to("cpu")
-                        except:
-                            pass
-                        # Test CPU prediction again to ensure it still works
-                        try:
-                            m.predict(test_input)
-                            print(f"Model confirmed working on CPU: {p}")
-                        except Exception as cpu_test_e:
-                            print(f"CPU test also failed: {cpu_test_e}")
-                            continue
-                except Exception as e:
-                    print(f"Model testing failed: {e}")
-                    print(f"Falling back to CPU for model: {p}")
-                    # Ensure model is on CPU
-                    try:
-                        m.to("cpu")
-                    except:
-                        pass
-            return m
-        except Exception as e:
-            print(f"⚠️ Failed to load model {p}: {e}")
-            continue
-    return None
 
-def _load_all_models_from_dir(dir_path):
-    models = []
-    try:
-        if os.path.isdir(dir_path):
-            for name in sorted(os.listdir(dir_path)):
-                full_path = os.path.join(dir_path, name)
-                try:
-                    m = load(full_path, override_flag=True)
-                    if DEVICE == "cuda":
-                        try:
-                            # Test if the model can actually work on CUDA
-                            test_input = np.random.randn(1, 30).astype(np.float32)
-                            # Try CPU first to ensure model works
-                            cpu_result = m.predict(test_input)
-                            # Now try CUDA
-                            m.to("cuda")
-                            cuda_result = m.predict(test_input)
-                            print(f"Model loaded successfully on CUDA: {name}")
-                            logger.info(f"Model loaded successfully on CUDA: {name}")
-                        except Exception as e:
-                            print(f"CUDA model loading failed for {name}: {e}")
-                            print(f"Falling back to CPU for model: {name}")
-                            logger.warning(f"CUDA model loading failed for {name}: {e} - Falling back to CPU")
-                            # Ensure model is on CPU
-                            try:
-                                m.to("cpu")
-                            except:
-                                pass
-                    models.append((name, m))
-                except Exception as e:
-                    print(f"Failed to load model {name}: {e}")
-                    continue
-    except Exception as e:
-        print(f"Error loading models from {dir_path}: {e}")
-    return models
+# Initialize dynamic model loader instead of loading all models at startup
+print("Initializing dynamic model loader...")
+logger.info("Initializing dynamic model loader for memory-efficient model management")
 
-# Discover any available models under known directories
-discovered = []
-for base_dir in ["athlete_models_tensors_updated"]:
-    discovered.extend(_load_all_models_from_dir(base_dir))
+# Create dynamic model loader with Jetson Nano 4GB optimized settings
+# Read configuration from jetson_nano_4gb_config.yaml
+CACHE_SIZE = int(os.getenv("MODEL_CACHE_SIZE", str(config.get('model_loading', {}).get('cache_size', 3))))
+MODEL_DEVICE = os.getenv("MODEL_DEVICE", config.get('model_loading', {}).get('device', 'cpu'))
+MODELS_DIR = os.getenv("MODEL_DIRECTORY", config.get('model_loading', {}).get('models_directory', 'athlete_models_tensors_updated'))
+ENABLE_MONITORING = config.get('model_loading', {}).get('enable_memory_monitoring', True)
 
-print(f"Discovered {len(discovered)} models in athlete_models_tensors_updated/")
-logger.info(f"Model Discovery: Found {len(discovered)} models in athlete_models_tensors_updated/")
-for name, _ in discovered:
-    print(f"   - {name}")
-    logger.info(f"Model Loaded: {name}")
+model_loader = DynamicModelLoader(
+    models_dir=MODELS_DIR,
+    cache_size=CACHE_SIZE,
+    device=MODEL_DEVICE,
+    enable_memory_monitoring=ENABLE_MONITORING
+)
 
-# Load default HB model: prefer first discovered
-loaded_hb_model = discovered[0][1] if len(discovered) > 0 else None
-if loaded_hb_model is None:
-    raise RuntimeError("No models found under athlete_models_tensors_updated/ or athletes_models/. Please add models.")
+# Get available models info
+available_models = model_loader.get_available_player_ids()
+max_available_models = len(available_models)
 
-# Determine how many models we actually have
-max_available_models = len(discovered)
-print(f"🎯 Will create model registry for indices 1-{max_available_models}")
+print(f"Dynamic model loader initialized (Jetson Nano 4GB optimized)")
+print(f"   📁 Models directory: {MODELS_DIR}/")
+print(f"   💾 Cache size: {CACHE_SIZE} models (optimized for 4GB RAM)")
+print(f"   Device: {MODEL_DEVICE} (GPU acceleration enabled)")
+print(f"   Available models: {max_available_models}")
+print(f"   🎮 Available player IDs: {available_models}")
+print(f"   🔧 Memory monitoring: {'Enabled' if ENABLE_MONITORING else 'Disabled'}")
 
-model_registry = {}
-for idx in range(1, max_available_models + 1):
-    model_path_candidates = [
-        f"athlete_models_tensors_updated/hb_{idx}_model",
-    ]
-    selected = _load_first_model(model_path_candidates)
-    if selected is None:
-        # Fallback: use discovered models in order 1..N
-        if idx - 1 < max_available_models:
-            selected = discovered[idx - 1][1]
-            print(f"Model {idx}: Using discovered model '{discovered[idx-1][0]}'")
-            logger.info(f"Model {idx}: Using discovered model '{discovered[idx-1][0]}'")
-        else:
-            print(f"Model {idx}: No specific model found, using default")
-            logger.info(f"Model {idx}: No specific model found, using default fallback")
+logger.info(f"Dynamic Model Loader: Initialized with Jetson Nano 4GB optimized settings")
+logger.info(f"Dynamic Model Loader: Cache size {CACHE_SIZE}, Device {MODEL_DEVICE}")
+logger.info(f"Dynamic Model Loader: Found {max_available_models} available models")
+logger.info(f"Dynamic Model Loader: Available player IDs: {available_models}")
+
+# Load a default model for fallback (first available model)
+default_model = None
+if available_models:
+    default_model = model_loader.get_model(available_models[0])
+    if default_model:
+        print(f"Default fallback model loaded for player {available_models[0]}")
+        logger.info(f"Default fallback model loaded for player {available_models[0]}")
     else:
-        print(f"Model {idx}: Loaded specific model from path")
-        logger.info(f"Model {idx}: Loaded specific model from path")
-    model_registry[idx] = selected if selected is not None else loaded_hb_model
+        print(f"Failed to load default fallback model")
+        logger.warning("Failed to load default fallback model")
 
-print(f"Model registry created with {len(model_registry)} models (indices 1-{max_available_models})")
-print(f"Each device will use its corresponding model (Device 1 → Model 1, Device 2 → Model 2, etc.)")
-logger.info(f"Model Registry: Created with {len(model_registry)} models (indices 1-{max_available_models})")
-logger.info(f"Model Mapping: Each device will use its corresponding model (Device 1 → Model 1, Device 2 → Model 2, etc.)")
+if default_model is None:
+    raise RuntimeError("No models found under athlete_models_tensors_updated/. Please add models.")
 
-# Initialize Madgwick filter
+print(f"Models will be loaded on-demand based on player/device IDs")
+print(f"Memory usage will be optimized with LRU cache eviction")
+logger.info("Dynamic model loading system ready - models will be loaded on-demand")
+
+# =============================================================================
+# STARTUP STATUS SUMMARY
+# =============================================================================
+print(f"\n{'='*60}")
+print(f"JETSON NANO ML PREDICTION ENGINE - STARTUP COMPLETE")
+print(f"{'='*60}")
+print(f"System Configuration:")
+print(f"   - Mode: Dynamic Model Loading (Memory Optimized)")
+print(f"   - Cache Size: {CACHE_SIZE} models (LRU eviction)")
+print(f"   - Device: {MODEL_DEVICE} (GPU acceleration enabled)")
+print(f"   - Available Models: {max_available_models} players")
+print(f"   - Memory Monitoring: {'Enabled' if ENABLE_MONITORING else 'Disabled'}")
+print(f"   - Health Metrics: Every 10 predictions")
+print(f"   - Technical Reports: Every 100 predictions")
+print(f"")
+print(f"Ready for:")
+print(f"   - Multi-device predictions (1-{max_available_models} players)")
+print(f"   - Training mode (actual HR from sensors)")
+print(f"   - Game mode (ML predictions)")
+print(f"   - Real-time MQTT data processing")
+print(f"")
+print(f"Display Strategy:")
+print(f"   - Health metrics: Every 10 predictions (HR, HRV, Stress, Recovery)")
+print(f"   - Technical info: Every 100 predictions (Memory, Cache)")
+print(f"   - Errors/warnings: Always logged to file")
+print(f"{'='*60}")
+print(f"Waiting for MQTT data...")
+print(f"{'='*60}\n")
+
+# =============================================================================
+# SYSTEM CONFIGURATION
+# =============================================================================
+
+# Sampling and Processing Parameters
+DT = 0.1                                        # Time step (seconds)
+FS_HZ = 10.0                                    # Sampling frequency (Hz)
+WINDOW_SECONDS = 3                              # Feature window duration (seconds)
+WINDOW_SAMPLES = int(WINDOW_SECONDS * FS_HZ)    # Samples per window
+ROLLING_WINDOW_SIZE = 30                        # Main rolling window size
+
+# G-Impact Detection Parameters
+G_IMPACT_ACC_THRESHOLD = 8 * 9.81               # 8g threshold (m/s²)
+G_IMPACT_GYRO_THRESHOLD = 300                   # Gyro threshold (deg/s)
+G_IMPACT_JERK_THRESHOLD = 100                   # Jerk threshold (m/s³)
+
+# =============================================================================
+# SENSOR PROCESSING INITIALIZATION
+# =============================================================================
+
+# Madgwick Filter for Orientation Estimation
 madgwick_filter = Madgwick()
 quaternion = np.array([1.0, 0.0, 0.0, 0.0])
 
-# Buffers
-N = 30  # Rolling window size
-hr_buffer = deque(maxlen=N)
-acc_buffer = deque(maxlen=N)
-gyro_buffer = deque(maxlen=N)
+# =============================================================================
+# DATA BUFFERS
+# =============================================================================
+
+# Primary Sensor Data Buffers
+hr_buffer = deque(maxlen=ROLLING_WINDOW_SIZE)
+acc_buffer = deque(maxlen=ROLLING_WINDOW_SIZE)
+gyro_buffer = deque(maxlen=ROLLING_WINDOW_SIZE)
 acc_mag_buffer = deque(maxlen=30)
+
+# Motion Analysis Buffers
 vel_buffer = deque([0.0], maxlen=1)
 dist_buffer = deque([0.0], maxlen=1)
-stress_buffer = []
-TEE_buffer = []
-g_impact_events = []  # List to store (timestamp, g_impact)
-g_impact_count = 0    # Counter for high-g impacts
 
-# --- Add rolling history for sophisticated g-impact detection ---
-acc_mag_history = deque(maxlen=5)
-gyro_mag_history = deque(maxlen=5)
-
-# Time tracking
-session_start_time = None
-last_vo2_update_time = None
-last_data_time = time.time()
-last_warning_time = 0  # Track when last warning was printed
-vo2_max_value = "-"
-session_end_time = None
-session_ended = False
-
-# MQTT connection tracking
-mqtt_connected = False
-mqtt_last_connect_time = 0
-mqtt_last_disconnect_time = 0
-mqtt_reconnect_attempts = 0
-mqtt_last_status_report = 0
-
-dt = 0.1  # time step
-FS_HZ = 10.0
-WINDOW_SECONDS = 3  # 3–5 s recommended; start with 3 s for responsiveness
-WINDOW_SAMPLES = int(WINDOW_SECONDS * FS_HZ)
-
-# TRIMP variables (will be initialized after athlete profile is loaded)
-trimp_buffer = []
-total_trimp = 0.0
-hr_rest = 60  # actual resting HR from database
-hr_max = None  # Will be calculated after age is loaded
-
-# Constants
-s_a1, s_a2, s_a4, s_a5 = 0.4, 0.2, 0.2, 0.3
-s_b = 10
-s_epsilon = 1e-6
-
-# Athlete profile will be initialized per-device on first message; use defaults until then
-Athlete_profile = {}
-MQTT_PUBLISH_TOPIC = "predictions"
-# Store latest sensor readings
-sensor_data = {
-    "acc": None,
-    "gyro": None,
-    "magno": None
-}
-
-# Initialize fitness, hydration
-fitness_level = 100.0
-hydration_level = 100.0
-
-# Add position tracking
-latest_position = {"x": None, "y": None}
-
-# --- Window buffers for feature engineering (per-axis, 3 s @ 10 Hz) ---
+# Feature Engineering Window Buffers (per-axis, 3s @ 10Hz)
 acc_x_win = deque(maxlen=WINDOW_SAMPLES)
 acc_y_win = deque(maxlen=WINDOW_SAMPLES)
 acc_z_win = deque(maxlen=WINDOW_SAMPLES)
 gyro_x_win = deque(maxlen=WINDOW_SAMPLES)
 gyro_y_win = deque(maxlen=WINDOW_SAMPLES)
 gyro_z_win = deque(maxlen=WINDOW_SAMPLES)
+
+# G-Impact Detection History
+acc_mag_history = deque(maxlen=5)
+gyro_mag_history = deque(maxlen=5)
+
+# =============================================================================
+# HEALTH METRICS BUFFERS
+# =============================================================================
+
+# Stress and Energy Tracking
+stress_buffer = []                              # Stress Buffer    
+TEE_buffer = []                                 # Total Energy Expenditure
+
+# TRIMP (Training Impulse) Tracking
+trimp_buffer = []                                # TRIMP Buffer
+total_trimp = 0.0                                # Total TRIMP
+
+# G-Impact Event Tracking
+g_impact_events = []                            # List of (timestamp, g_impact) tuples
+g_impact_count = 0                              # Counter for high-g impacts
+
+# =============================================================================
+# SESSION AND TIMING TRACKING
+# =============================================================================
+
+# Session Lifecycle
+session_start_time = None
+session_end_time = None
+session_ended = False
+
+# Update Timers
+last_vo2_update_time = None
+last_data_time = time.time()
+last_warning_time = 0
+
+# Health Metrics Values
+vo2_max_value = "-"
+
+# =============================================================================
+# MQTT CONNECTION TRACKING
+# =============================================================================
+
+mqtt_connected = False
+mqtt_last_connect_time = 0
+mqtt_last_disconnect_time = 0
+mqtt_reconnect_attempts = 0
+mqtt_last_status_report = 0
+
+# =============================================================================
+# ATHLETE PROFILE AND DATA
+# =============================================================================
+
+# Default Athlete Profile (will be initialized per-device)
+hr_rest = 60                                    # Resting heart rate (BPM)
+hr_max = None                                   # Maximum heart rate (calculated from age)
+
+# Global Athlete Profile Storage
+Athlete_profile = {}
+
+# Current Sensor Data
+sensor_data = {
+    "acc": None,
+    "gyro": None,
+    "magno": None
+}
+
+# Position Tracking
+latest_position = {"x": None, "y": None}
+
+# MQTT Configuration
+MQTT_PUBLISH_TOPIC = "predictions"
+
 
 # --- Model input dimension cache and helpers ---
 model_input_dims = {}
@@ -756,14 +759,97 @@ def butter_bandpass_filter(data, low_cutoff=0.3, high_cutoff=4.5, fs=10.0, order
     return lfilter(b, a, data)
 
 def calculate_rmssd(hr_values):
-    rr_intervals = 60000 / np.array(hr_values)
+    """
+    Calculate RMSSD (Root Mean Square of Successive Differences) for HRV analysis.
+    
+    Args:
+        hr_values: List/array of heart rate values in BPM
+        
+    Returns:
+        RMSSD value in milliseconds, or 0.0 if insufficient/invalid data
+    """
+    if len(hr_values) < 5:
+        return 0.0  # Need at least 5 HR values for reliable RMSSD
+    
+    # Convert to numpy array and filter invalid values
+    hr_array = np.array(hr_values)
+    
+    # Filter out physiologically impossible HR values
+    valid_hr = hr_array[(hr_array > 30) & (hr_array < 220)]
+    
+    if len(valid_hr) < 3:
+        return 0.0  # Need at least 3 valid values
+    
+    # Convert HR to RR intervals (milliseconds)
+    rr_intervals = 60000 / valid_hr
+    
+    # Calculate successive differences
     rr_diffs = np.diff(rr_intervals)
-    return round(np.sqrt(np.mean(rr_diffs ** 2)), 2)
+    
+    # Remove extreme outliers (>3 standard deviations from mean)
+    if len(rr_diffs) > 2:
+        mean_diff = np.mean(rr_diffs)
+        std_diff = np.std(rr_diffs)
+        
+        # Keep only differences within 3 standard deviations
+        valid_diffs = rr_diffs[np.abs(rr_diffs - mean_diff) <= 3 * std_diff]
+        
+        if len(valid_diffs) > 0:
+            # Calculate RMSSD
+            rmssd = np.sqrt(np.mean(valid_diffs ** 2))
+            return round(rmssd, 2)
+    
+    return 0.0
 
-def estimate_vo2_max(age, gender, current_hr, hrv):
-    hr_mod = 220 - current_hr
-    vo2 = 60.0 - (0.55 * age) + (0.2 * hrv) + (0.3 * hr_mod) + (5 * gender)
-    return round(vo2, 2)
+def estimate_vo2_max(age, gender, current_hr, hrv, hr_rest=60, hr_max=None):
+    """
+    Estimate VO2 max based on heart rate, HRV, age, and gender.
+    
+    Uses a simplified estimation method based on:
+    - Heart Rate Reserve (HRR) as primary indicator
+    - HRV as secondary indicator of cardiovascular fitness
+    - Age and gender adjustments based on physiological norms
+    
+    Args:
+        age: Age in years
+        gender: 1 for male, 0 for female
+        current_hr: Current heart rate (BPM)
+        hrv: Heart rate variability (RMSSD in ms)
+        hr_rest: Resting heart rate (BPM)
+        hr_max: Maximum heart rate (BPM), calculated if None
+        
+    Returns:
+        Estimated VO2 max in ml/kg/min (clamped to realistic range 20-80)
+    """
+    if hr_max is None:
+        hr_max = 220 - age  # Standard age-based formula
+    
+    # Heart Rate Reserve (HRR) - correct calculation
+    hrr = (current_hr - hr_rest) / (hr_max - hr_rest + 1e-6)
+    hrr = max(0, min(1, hrr))  # Clamp to [0,1]
+    
+    # Base VO2 max estimation using HRR
+    # This is a simplified model - in reality, VO2 max requires lab testing
+    base_vo2 = 15.0 + (hrr * 45.0)  # Range: 15-60 ml/kg/min based on HRR
+    
+    # Age adjustment (VO2 max declines with age)
+    age_factor = -0.4 * (age - 20)  # Decline after age 20
+    
+    # Gender adjustment (males typically have higher VO2 max)
+    gender_factor = 8.0 if gender == 1 else 0.0  # Males typically 8-12 ml/kg/min higher
+    
+    # HRV adjustment (higher HRV indicates better cardiovascular fitness)
+    if hrv > 0:
+        # Normalize HRV: 50ms = 0 adjustment, 100ms+ = +5 adjustment
+        hrv_factor = max(0, min(5, (hrv - 50) / 10))
+    else:
+        hrv_factor = 0
+    
+    # Calculate final VO2 max
+    vo2_max = base_vo2 + age_factor + gender_factor + hrv_factor
+    
+    # Clamp to physiologically realistic range
+    return round(max(20, min(80, vo2_max)), 1)
 
 def training_energy_expenditure(velocity, duration_s, mass_kg):
     velocity_kmph = velocity * 3.6
@@ -815,22 +901,53 @@ def parse_sensor_payload(payload):
     return None
 
 def calculate_stress(hr, hrv, acc_mag, gyro_mag, age, gender, hr_rest=60, hr_max=200):
-    # Normalize features
+    """
+    Calculate stress level based on physiological and activity indicators.
+    
+    Args:
+        hr: Current heart rate (BPM)
+        hrv: Heart rate variability (RMSSD in ms)
+        acc_mag: Acceleration magnitude (m/s²)
+        gyro_mag: Gyroscope magnitude (deg/s)
+        age: Age in years
+        gender: 1 for male, 0 for female
+        hr_rest: Resting heart rate (BPM)
+        hr_max: Maximum heart rate (BPM)
+        
+    Returns:
+        Stress percentage (0-100)
+    """
+    # Heart Rate Reserve (correct calculation)
     hrr = (hr - hr_rest) / (hr_max - hr_rest + 1e-6)
-    hrv_norm = 1 - (hrv / 100)  # Lower HRV = higher stress
-    acc_norm = min(acc_mag / 10, 1.0)  # scale to [0,1]
-    gyro_norm = min(gyro_mag / 10, 1.0)
-    # Weighted sum (tune weights as needed)
+    hrr = max(0, min(1, hrr))  # Clamp to [0,1]
+    
+    # HRV normalization (improved)
+    # Typical RMSSD range: 20-200ms, with 50-100ms being normal
+    # Higher HRV = lower stress, so invert the relationship
+    if hrv <= 0:
+        hrv_norm = 1.0  # No HRV data = assume high stress
+    else:
+        # Normalize: 100ms = 0 stress, 20ms = 1 stress
+        hrv_norm = max(0, min(1, (100 - hrv) / 80))
+    
+    # Activity normalization (improved thresholds)
+    acc_norm = min(acc_mag / 15, 1.0)  # Increased threshold from 10 to 15
+    gyro_norm = min(gyro_mag / 15, 1.0)  # Increased threshold from 10 to 15
+    
+    # Weighted score (more balanced, evidence-based)
     score = (
-        0.4 * hrr +
-        0.2 * hrv_norm +
-        0.2 * acc_norm +
-        0.1 * gyro_norm +
-        0.1 * (1 if gender == 0 else 0)  # e.g., add a small gender effect
+        0.5 * hrr +           # Heart rate is primary stress indicator
+        0.3 * hrv_norm +      # HRV is secondary indicator
+        0.1 * acc_norm +      # Activity contributes less
+        0.1 * gyro_norm       # Gyro contributes less
     )
-    # Nonlinear mapping (sigmoid)
-    stress_percent = 100 * (1 / (1 + np.exp(-8 * (score - 0.5))))
-    return round(stress_percent, 1)
+    
+    # Gentler sigmoid curve (less steep transition)
+    # Adjust parameters for more realistic stress response curve
+    stress_percent = 100 * (1 / (1 + np.exp(-4 * (score - 0.3))))
+    
+    # Clamp to valid range
+    return round(max(0, min(100, stress_percent)), 1)
 
 def calculate_trimp(hr_avg, hr_rest, hr_max, duration_min, gender="male"):
     #Calculate TRIMP (Training Impulse) for a single session.
@@ -859,7 +976,7 @@ def get_trimp_zone(total_trimp):
     else:
         return "Very High", "Very intense session"
 
-def get_recovery_recommendations(total_trimp, stress_percent, fitness_level):
+def get_recovery_recommendations(total_trimp, stress_percent):
     """Generate recovery recommendations based on TRIMP and other metrics"""
     recommendations = []
     
@@ -877,12 +994,9 @@ def get_recovery_recommendations(total_trimp, stress_percent, fitness_level):
         recovery_time = "3+ days"
         recommendations.append("Very high intensity - extended recovery needed (3+ days)")
     
-    # Additional recommendations based on stress and fitness
+    # Additional recommendations based on stress
     if stress_percent > 70:
         recommendations.append("High stress detected - consider stress management techniques")
-    
-    if fitness_level < 50:
-        recommendations.append("Low fitness level - focus on gradual progression")
     
     if total_trimp > 200 and stress_percent > 60:
         recommendations.append("High load + stress - monitor for overtraining signs")
@@ -904,7 +1018,7 @@ def get_training_recommendations(trimp_zone, stress_percent):
         recommendations.extend([
             "Intense training session - plan recovery accordingly",
             "Monitor stress and fatigue levels",
-            "Maintain proper nutrition and hydration"
+            "Maintain proper nutrition"
         ])
     elif trimp_zone == "Moderate":
         recommendations.extend([
@@ -929,7 +1043,7 @@ def get_training_recommendations(trimp_zone, stress_percent):
 
 def generate_session_summary():
     """Generate end-of-session summary with recommendations"""
-    global session_end_time, total_trimp, stress_buffer, fitness_level, hydration_level, g_impact_count
+    global session_end_time, total_trimp, stress_buffer, g_impact_count
     
     if session_end_time is None:
         return None
@@ -939,7 +1053,7 @@ def generate_session_summary():
     
     # Calculate final TRIMP zone and recommendations
     trimp_zone, zone_description = get_trimp_zone(total_trimp)
-    recovery_time, recovery_recommendations = get_recovery_recommendations(total_trimp, avg_stress, fitness_level)
+    recovery_time, recovery_recommendations = get_recovery_recommendations(total_trimp, avg_stress)
     training_recommendations = get_training_recommendations(trimp_zone, avg_stress)
     
     summary = {
@@ -949,8 +1063,6 @@ def generate_session_summary():
         "trimp_zone": trimp_zone,
         "zone_description": zone_description,
         "avg_stress": avg_stress,
-        "final_fitness_level": fitness_level,
-        "final_hydration_level": hydration_level,
         "g_impact_count": g_impact_count,
         "recovery_time": recovery_time,
         "recovery_recommendations": recovery_recommendations,
@@ -962,7 +1074,6 @@ def generate_session_summary():
 
 def process_data():
     global session_start_time, last_vo2_update_time, vo2_max_value
-    global fitness_level, hydration_level
     global quaternion
     global g_impact_count
     global hrv_rmssd
@@ -999,7 +1110,7 @@ def process_data():
     gyro_mag_history.append(gyro_mag)
     # Compute jerk (rate of change of acc_mag)
     if len(acc_mag_history) >= 2:
-        jerk = abs(acc_mag_history[-1] - acc_mag_history[-2]) / dt
+        jerk = abs(acc_mag_history[-1] - acc_mag_history[-2]) / DT
     else:
         jerk = 0
     
@@ -1008,26 +1119,39 @@ def process_data():
         if acc_filtered is not None:
             acc_buffer.append(acc_filtered[-1])
 
-    if len(acc_buffer) == N:
-        prev_acc, curr_acc = abs(acc_buffer[0]), abs(acc_buffer[-1])
-        prev_vel = vel_buffer[-1]
-        new_vel = 0.5 * (prev_acc + curr_acc) * dt
+    # Calculate velocity and distance based on current acceleration
+    if len(acc_buffer) >= 2:  # Need at least 2 readings for velocity calculation
+        # Use the most recent acceleration magnitude for velocity calculation
+        current_acc = acc_buffer[-1] if len(acc_buffer) > 0 else 0.0
+        prev_vel = vel_buffer[-1] if len(vel_buffer) > 0 else 0.0
         
-        is_resting = all(a < 0.75 for a in list(acc_buffer)[-2:])
-
+        # Simple velocity calculation: v = v0 + a * dt
+        new_vel = prev_vel + current_acc * DT
+        
+        # Check if resting (lower threshold for more sensitivity)
+        is_resting = current_acc < 0.5  # Reduced from 0.75 to 0.5
+        
         if is_resting:
             new_vel = 0.0
             vel_buffer.clear()
             vel_buffer.append(0.0)
-            new_dist = dist_buffer[-1] + 0.0
+            new_dist = dist_buffer[-1] if len(dist_buffer) > 0 else 0.0
             dist_buffer.append(new_dist)
         else:
             vel_buffer.append(new_vel)
-            prev_dist = dist_buffer[-1]
-            new_dist = prev_dist + 0.5 * new_vel * dt
+            prev_dist = dist_buffer[-1] if len(dist_buffer) > 0 else 0.0
+            new_dist = prev_dist + new_vel * DT  # Simplified distance calculation
             dist_buffer.append(new_dist)
     else:
-        new_vel, new_dist = 0.0, 0.0
+        # Use raw acceleration magnitude if filtered buffer is not ready
+        if len(acc_mag_buffer) > 0:
+            current_acc = acc_mag_buffer[-1]
+            new_vel = current_acc * DT  # Simple velocity from acceleration
+            new_dist = dist_buffer[-1] + new_vel * DT if len(dist_buffer) > 0 else new_vel * DT
+            dist_buffer.append(new_dist)
+            vel_buffer.append(new_vel)
+        else:
+            new_vel, new_dist = 0.0, 0.0
 
     # --- Windowed feature engineering (does not change model inputs yet) ---
     acc_x_win.append(float(acc_x))
@@ -1121,14 +1245,26 @@ def process_data():
     ]
 
 
-    # Batch predictions across all loaded models (1..max_available_models)
-    batch_predictions = {}
-    for idx, mdl in model_registry.items():
-        try:
-            pred_val = float(predict_with_adaptive_input(mdl, features)[0])
-        except Exception:
-            pred_val = float(predict_with_adaptive_input(loaded_hb_model, features)[0])
-        batch_predictions[idx] = round(pred_val, 0)
+    # Dynamic model loading - only predict for the current device's model
+    # This saves significant memory compared to batch predictions across all models
+    device_model = None
+    try:
+        device_idx = int(str(device_id).lstrip("0") or "0")
+    except Exception:
+        device_idx = 0
+    
+    # Map device_idx to available model range
+    if device_idx > max_available_models:
+        device_idx = (device_idx % max_available_models) + 1
+        # Device mapping handled silently to reduce verbosity
+    elif device_idx == 0:
+        device_idx = 1  # Default to model 1 if device_id is 0
+    
+    # Get model for this device (loads on-demand if not in cache)
+    device_model = model_loader.get_model(device_idx)
+    if device_model is None:
+        # Silently use default model to reduce verbosity
+        device_model = default_model
 
     # Check if we're in training mode (use actual HR) or game mode (predict HR)
     mode = sensor_data.get("mode", "game")  # Default to game mode if not specified
@@ -1138,56 +1274,61 @@ def process_data():
         actual_hr = sensor_data.get("heart_rate_bpm")
         if actual_hr is not None:
             predicted_hr = round(float(actual_hr), 0)
-            print(f"🏃 Training Mode: Using actual HR from sensors: {predicted_hr} bpm")
             # Training mode processing (logged only on first use per device)
         else:
             # Fallback to prediction if no actual HR available
-            print("⚠️  Training mode but no actual HR found, falling back to prediction")
             logger.warning(f"Training Mode - Device {device_id}: No actual HR found, falling back to ML prediction")
             mode = "game"  # Switch to prediction mode
     
     if mode == "game":
-        # In game mode, predict heart rate using ML models
-        try:
-            device_idx = int(str(device_id).lstrip("0") or "0")
-        except Exception:
-            device_idx = 0
-        
-        # Map device_idx to available model range (1 to max_available_models)
-        if device_idx > max_available_models:
-            device_idx = (device_idx % max_available_models) + 1
-            print(f"🔄 Device {device_id} mapped to model {device_idx} (max available: {max_available_models})")
-        elif device_idx == 0:
-            device_idx = 1  # Default to model 1 if device_id is 0
-            print(f"🔄 Device {device_id} (zero) mapped to model {device_idx}")
-        
-        selected_model = model_registry.get(device_idx, loaded_hb_model)
-        
-        # ML processing details (logged only on first use per device)
+        # In game mode, predict heart rate using the dynamically loaded model
         device_type = "CUDA" if DEVICE == "cuda" else "CPU"
         
         try:
-            predicted_hr = float(predict_with_adaptive_input(selected_model, features)[0])
+            predicted_hr = float(predict_with_adaptive_input(device_model, features)[0])
         except Exception:
-            predicted_hr = float(predict_with_adaptive_input(loaded_hb_model, features)[0])
+            predicted_hr = float(predict_with_adaptive_input(default_model, features)[0])
         predicted_hr = round(predicted_hr, 0)
-        print(f"⚽ Game Mode: Predicted HR using ML model: {predicted_hr} bpm")
-    
+
+
     hr_buffer.append(predicted_hr)
 
-    print(f"Velocity: {round(new_vel, 2)} m/s | Distance: {round(new_dist, 2)} m")
-    if mode == "training":
-        print(f"Actual HR: {predicted_hr} bpm (from sensors)")
+    # Display activity metrics for every prediction (moved above heart rate)
+    current_acc_display = acc_buffer[-1] if len(acc_buffer) > 0 else (acc_mag_buffer[-1] if len(acc_mag_buffer) > 0 else 0.0)
+    print(f"Activity: Velocity: {round(new_vel, 2)} m/s | Distance: {round(new_dist, 2)} m | Acc: {round(current_acc_display, 2)} m/s²")
+
+    # Show heart rate and HRV information for every prediction
+    # Get actual HR if available (training mode)
+    actual_hr = sensor_data.get("heart_rate_bpm") if mode == "training" else None
+    
+    # Display heart rate information for every prediction
+    if actual_hr is not None:
+        print(f"Heart Rate: {actual_hr} bpm (actual) | {predicted_hr} bpm (predicted) | Mode: {mode}")
     else:
-        print(f"Predicted HR: {predicted_hr} bpm (ML model)")
+        print(f"Heart Rate: {predicted_hr} bpm (predicted) | Mode: {mode}")
+    
+    # Display HRV if available (need at least 5 values for RMSSD calculation)
+    if len(hr_buffer) >= 5:
+        current_hrv = calculate_rmssd(list(hr_buffer)[-min(10, len(hr_buffer)):])
+        print(f"HRV (RMSSD): {current_hrv:.1f} ms")
+    else:
+        print(f"HRV (RMSSD): Calculating... (need {5 - len(hr_buffer)} more readings)")
+    
+    # Show comprehensive health metrics every 5 predictions for better visibility
+    if len(hr_buffer) % 5 == 0 and len(hr_buffer) > 0:  # Show detailed metrics every 5 predictions
+        # Display stress if available
+        if len(hr_buffer) >= ROLLING_WINDOW_SIZE:
+            current_stress = calculate_stress(np.mean(hr_buffer), hrv_rmssd, np.mean(acc_buffer), np.mean(gyro_buffer), age, gender, hr_rest, hr_max)
+            print(f"Stress Level: {current_stress:.1f}%")
+        
 
     # Robust stress calculation using rolling means
-    if len(hr_buffer) == N:
+    if len(hr_buffer) == ROLLING_WINDOW_SIZE:
         hrv_rmssd = calculate_rmssd(hr_buffer)
         acc_mean = np.mean(acc_buffer)
         gyro_mean = np.mean(gyro_buffer)
         hr_mean = np.mean(hr_buffer)
-        stress_percent = calculate_stress(hr_mean, hrv_rmssd, acc_mean, gyro_mean, age, gender)
+        stress_percent = calculate_stress(hr_mean, hrv_rmssd, acc_mean, gyro_mean, age, gender, hr_rest, hr_max)
         stress_buffer.append(stress_percent)
         avg_stress = round(sum(stress_buffer) / len(stress_buffer), 2)
         stress_label = (
@@ -1195,7 +1336,8 @@ def process_data():
             "Moderate" if avg_stress < 70 else
             "High"
         )
-        print(f"Stress: {stress_percent}% (avg: {avg_stress}%) - {stress_label}")
+        print(f"Stress: {stress_percent:.1f}% (avg: {avg_stress:.1f}%) - {stress_label}")
+        print(f"HRV: {hrv_rmssd:.1f} ms | HR: {hr_mean:.0f} bpm")
     else:
         hrv_rmssd = 0
         stress_percent = 0
@@ -1211,51 +1353,45 @@ def process_data():
 
     if elapsed_time >= 300:
         if last_vo2_update_time is None or (now - last_vo2_update_time >= 300):
-            vo2_max_value = estimate_vo2_max(age, gender, np.mean(hr_buffer), hrv_rmssd)
-            last_vo2_update_time = now
-            # VO2 Max updates are not critical for logging
+            if len(hr_buffer) > 0:  # Ensure we have HR data
+                vo2_max_value = estimate_vo2_max(age, gender, np.mean(hr_buffer), hrv_rmssd, hr_rest, hr_max)
+                last_vo2_update_time = now
+                # VO2 updates logged to file only, no console output
+                logger.info(f"VO2 Max Updated: {vo2_max_value} ml/kg/min (HR: {np.mean(hr_buffer):.0f}, HRV: {hrv_rmssd:.1f})")
+            else:
+                # VO2 warnings logged to file only, no console output
+                pass
     else:
         vo2_max_value = "-"
+        # VO2 waiting message removed to reduce verbosity
 
-    # --- Energy, Fitness, Hydration decay ---
-    fitness_decay_rate = 0.0005
-    hydration_decay_rate = 0.0005
-
-    activity_intensity = abs(new_vel)
-    stress_factor = stress_percent / 100
-
-    fitness_loss = fitness_decay_rate * (1 + stress_factor)
-    hydration_loss = hydration_decay_rate * (1 + stress_factor + activity_intensity * 0.3)
-
-    fitness_level = max(0, round(fitness_level - fitness_loss, 2))
-    hydration_level = max(0, round(hydration_level - hydration_loss, 2))
 
     # --- Total Energy Expenditure Calculation ---
-    tte = training_energy_expenditure(new_vel, dt, weight)
+    tte = training_energy_expenditure(new_vel, DT, weight)
     TEE_buffer.append(tte)
     active_tee = round(sum(TEE_buffer), 2)
 
-    print(f"TEE: {active_tee}kcal, Fitness: {fitness_level}%, Hydration: {hydration_level}%")
-    print(f"Training Energy Expenditure: {tte} kcal | Total: {active_tee} kcal")
+    print(f"Energy: {tte:.2f} kcal | Total: {active_tee} kcal")
 
     # --- TRIMP Calculation ---
-    if len(hr_buffer) >= 5:  # Need at least 5 HR readings for meaningful TRIMP
-        hr_avg = np.mean(list(hr_buffer)[-5:])  # Use last 5 HR readings
-        duration_min = elapsed_time / 60.0  # Convert to minutes
+    if len(hr_buffer) >= 5:                             # Need at least 5 HR readings for meaningful TRIMP
+        hr_avg = np.mean(list(hr_buffer)[-5:])          # Use last 5 HR readings
+        duration_min = elapsed_time / 60.0              # Convert to minutes
         gender_str = "male" if gender == 1 else "female"
         
         current_trimp = calculate_trimp(hr_avg, hr_rest, hr_max, duration_min, gender_str)
         trimp_buffer.append(current_trimp)
         total_trimp = round(sum(trimp_buffer), 2)
         
-        print(f"TRIMP: {round(current_trimp, 2)} | Total TRIMP: {total_trimp}")
+        # Get TRIMP zone and recovery recommendations
+        trimp_zone, zone_description = get_trimp_zone(total_trimp)
+        recovery_time, recovery_recommendations = get_recovery_recommendations(total_trimp, avg_stress)
+        
+        print(f"TRIMP: {round(current_trimp, 2)} | Total: {total_trimp} | Zone: {trimp_zone}")
+        print(f"Recovery: {recovery_time} | {zone_description}")
     else:
         current_trimp = 0
         total_trimp = 0
-
-    G_IMPACT_ACC_THRESHOLD = 8 * 9.81  # 8g threshold
-    G_IMPACT_GYRO_THRESHOLD = 300      # deg/s, adjust as needed
-    G_IMPACT_JERK_THRESHOLD = 100      # m/s^3, adjust as needed
 
     # Detect high-g impact: require all three criteria
     injury_risk = False
@@ -1282,7 +1418,7 @@ def process_data():
             "jerk": round(jerk, 2),
             "max_axis": max_axis
         })
-        impact_msg = f"⚠️ High G-Impact detected! ({acc_mag:.2f} m/s², gyro: {gyro_mag:.2f} deg/s, jerk: {jerk:.2f} m/s³) at {event_time} - Possible injury risk. Position: ({latest_position['x']}, {latest_position['y']}) Axis: {max_axis}"
+        impact_msg = f"High G-Impact detected! ({acc_mag:.2f} m/s², gyro: {gyro_mag:.2f} deg/s, jerk: {jerk:.2f} m/s³) at {event_time} - Possible injury risk. Position: ({latest_position['x']}, {latest_position['y']}) Axis: {max_axis}"
         print(impact_msg)
         logger.warning(impact_msg)
         # When saving g-impact log, use organized folder structure:
@@ -1315,12 +1451,10 @@ def process_data():
         "stress": stress_label,
         "vo2_max": vo2_max_value,
         "Total_active_energy_expenditure": active_tee,
-        "fitness_level": fitness_level,
-        "hydration_level": hydration_level,
         "injury_risk": injury_risk,
         "g_impact": round(acc_mag, 2),
         "g_impact_count": g_impact_count,
-        "g_impact_events": g_impact_events[-10:],  # Last 10 events for quick view
+        "g_impact_events": g_impact_events[-10:],       # Last 10 events for quick view
         "current_trimp": round(current_trimp, 2),
         "total_trimp": total_trimp,
         "hr_rest": hr_rest,
@@ -1330,7 +1464,9 @@ def process_data():
         # Only include the prediction for this specific device's model (for game mode)
         "model_prediction": {
             "model_id": device_idx if mode == "game" else None,
-            "predicted_hr": predicted_hr if mode == "game" else None
+            "predicted_hr": predicted_hr if mode == "game" else None,
+            "model_loaded_dynamically": True,
+            "cache_info": model_loader.get_cache_info() if mode == "game" else None
         } if mode == "game" else None
     }
 
@@ -1344,16 +1480,24 @@ def process_data():
         json.dump(output, f, indent=2)
 
     client.publish(MQTT_PUBLISH_TOPIC, json.dumps(output))
-    print(f"📤 Published metrics to MQTT topic '{MQTT_PUBLISH_TOPIC}'")
-    
-    # Log prediction publishing only once per device
+    # MQTT publishing logged to file only, no console output
     if device_id not in prediction_logged_devices:
         logger.info(f"Published prediction to MQTT topic: {MQTT_PUBLISH_TOPIC}")
         prediction_logged_devices.add(device_id)
     
-    # Real-time memory monitoring (every 10 data points)
-    if len(hr_buffer) % 10 == 0 and len(hr_buffer) > 0:
-        print_memory_usage(" (real-time)")
+    # Memory monitoring and cache status (every 100 data points to reduce noise)
+    if len(hr_buffer) % 100 == 0 and len(hr_buffer) > 0:
+        print_memory_usage(" (periodic check)")
+        
+        # Show dynamic model loader cache status
+        cache_info = model_loader.get_cache_info()
+        if cache_info["total_requests"] > 0:
+            print(f"🧠 Model Cache: {cache_info['cache_size']}/{cache_info['max_cache_size']} models, "
+                  f"Hit rate: {cache_info['cache_hit_rate']:.1%}, "
+                  f"Requests: {cache_info['total_requests']}")
+            print(f"Cache Details: Loaded: {cache_info['models_loaded']}, "
+                  f"Evicted: {cache_info['models_evicted']}, "
+                  f"Avg load time: {cache_info['average_load_time']:.2f}s")
 
 # --- MQTT callbacks ---
 def on_connect(client, userdata, flags, rc):
@@ -1362,44 +1506,37 @@ def on_connect(client, userdata, flags, rc):
     
     if rc == 0:
         mqtt_connected = True
-        print(f"✅ Connected to MQTT Broker successfully (attempt #{mqtt_reconnect_attempts + 1})")
         logger.info(f"Connected to MQTT Broker with result code: {rc}")
         # Subscribe to all per-player topics and keep legacy topic for compatibility
         client.subscribe("player/+/sensor/data")
         client.subscribe("sensor/data")
-        print("📡 Subscribed to player/+/sensor/data and sensor/data topics")
         logger.info("Subscribed to player/+/sensor/data and sensor/data topics")
         mqtt_reconnect_attempts = 0  # Reset counter on successful connection
     else:
         mqtt_connected = False
-        print(f"❌ Failed to connect to MQTT Broker with result code {rc}")
         logger.error(f"Failed to connect to MQTT Broker with result code {rc}")
         mqtt_reconnect_attempts += 1
 
 def on_disconnect(client, userdata, rc):
     global mqtt_connected, mqtt_last_disconnect_time, mqtt_reconnect_attempts
     mqtt_connected = False
-    mqtt_last_disconnect_time = time.time()
-    
-    print(f"⚠️  Disconnected from MQTT Broker (code: {rc}). Attempting to reconnect...")
+    mqtt_last_disconnect_time = time.time()    
     logger.warning(f"Disconnected from MQTT Broker with result code: {rc}")
     
     while not mqtt_connected:
         try:
             mqtt_reconnect_attempts += 1
-            print(f"🔄 Reconnection attempt #{mqtt_reconnect_attempts}...")
+            # Reconnection attempt logged to file only
             client.reconnect()
-            print("✅ Reconnected successfully.")
             logger.info("Successfully reconnected to MQTT Broker")
             break
         except Exception as e:
-            print(f"❌ Reconnection attempt #{mqtt_reconnect_attempts} failed: {e}")
             logger.warning(f"Reconnection attempt failed: {e}, retrying in 5 seconds...")
             time.sleep(5)
 
 def on_message(client, userdata, msg):
     topic = msg.topic
-    global sensor_data
+    global sensor_data, unique_mqtt_topics
 
     try:
         parsed_data = json.loads(msg.payload.decode())
@@ -1415,6 +1552,9 @@ def on_message(client, userdata, msg):
             # Unable to determine device id; skip
             return
         device_id_str = device_id_str.zfill(3)
+        
+        # Track unique MQTT topics
+        unique_mqtt_topics.add(topic)
 
         # Show that we received sensor data (less verbose)
         athlete_id = parsed_data.get("athlete_id", "unknown")
@@ -1430,7 +1570,9 @@ def on_message(client, userdata, msg):
             logger.info(f"Device {device_id_str} - MQTT prediction topic: {device_id_str}/predictions")
 
         # Get or init per-device context and sync into globals
-        ctx = device_contexts.get(device_id_str) or _init_device_context(device_id_str)
+        if device_id_str not in device_contexts:
+            _init_device_context(device_id_str)
+        ctx = device_contexts[device_id_str]
         _load_context_to_globals(ctx)
         
         # Optionally update athlete profile from payload if provided
@@ -1438,7 +1580,7 @@ def on_message(client, userdata, msg):
         age_in = parsed_data.get("age")
         weight_in = parsed_data.get("weight")
         height_in = parsed_data.get("height")
-        gender_in = parsed_data.get("gender")  # 'M'/'F' or 1/0
+        gender_in = parsed_data.get("gender")          # 'M'/'F' or 1/0
         updated = False
         if name_in is not None:
             ctx["name"] = str(name_in)
@@ -1474,7 +1616,7 @@ def on_message(client, userdata, msg):
             # update derived fields
             ctx["hr_max"] = 220 - int(ctx.get("age", 25))
             _load_context_to_globals(ctx)
-            print(f"👤 Player {athlete_id}: Age={ctx['age']}, Weight={ctx['weight']}kg, Height={ctx['height']}cm, Gender={'Male' if ctx['gender'] == 1 else 'Female'}, HR_max={ctx['hr_max']}")
+            print(f"Player {athlete_id}: Age={ctx['age']}, Weight={ctx['weight']}kg, Height={ctx['height']}cm, Gender={'Male' if ctx['gender'] == 1 else 'Female'}, HR_max={ctx['hr_max']}")
             # Only log profile updates, not every data point
         
         # Update last data time for this device
@@ -1503,10 +1645,10 @@ def on_message(client, userdata, msg):
         }
 
         # Process the data using globals mapped from this context
-        print(f"🔄 Processing Player {athlete_id} data...")
+        print(f"Processing Player {athlete_id} data...")
         process_data()
-        print(f"✅ Player {athlete_id} processing complete")
-        print(" ")  # Noticeable line break between players
+        print(f"Player {athlete_id} processing complete")
+        print(" ")                                      # Noticeable line break between players
         # Persist updated globals back to context
         _save_globals_to_context(ctx)
 
@@ -1533,13 +1675,11 @@ def check_session_end():
 
             summary = generate_session_summary()
             if summary:
-                print(f"\n📊 SESSION SUMMARY (device {device_id_str}):")
+                print(f"\nSESSION SUMMARY (device {device_id_str}):")
                 print(f"Duration: {summary['session_duration_minutes']} minutes")
                 print(f"Total TRIMP: {summary['total_trimp']}")
                 print(f"TRIMP Zone: {summary['trimp_zone']} - {summary['zone_description']}")
                 print(f"Average Stress: {summary['avg_stress']}%")
-                print(f"Final Fitness Level: {summary['final_fitness_level']}%")
-                print(f"Final Hydration Level: {summary['final_hydration_level']}%")
                 print(f"G-Impact Events: {summary['g_impact_count']}")
 
                 base_output_dir = "prediction_outputs"
@@ -1578,18 +1718,25 @@ if __name__ == "__main__":
     
     client = mqtt.Client()
     client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_message = on_message
     logger.info(f"Connecting to MQTT broker: {MQTT_BROKER}:{MQTT_PORT}")
     client.connect(MQTT_BROKER, MQTT_PORT, 60)
     
-    print(f"🚀 Starting test deployment in multi-device mode")
-    print(f"📡 Subscribing to player/+/sensor/data and sensor/data topics")
     logger.info(f"Starting test deployment in multi-device mode")
     logger.info(f"MQTT subscription topics: player/+/sensor/data, sensor/data")
     # Reduced logging for subscription messages
 
+    # Initialize separate timers for different purposes
+    last_status_report_time = 0  # For status updates every 30 seconds
+    last_warning_report_time = 0  # For warnings every 5 seconds
+    
+    # Simple MQTT topic tracking
+    unique_mqtt_topics = set()
+
     while True:
-        client.loop(timeout=1.0)
+        client.loop(timeout=1.0)  # Non-blocking with 1-second timeout
+        current_time = time.time()
 
         # Check for session end first
         if check_session_end():
@@ -1602,8 +1749,8 @@ if __name__ == "__main__":
             
             summary = generate_session_summary()
             if summary:
-                print(f"\n📊 SESSION SUMMARY:")
-                logger.info("📊 SESSION SUMMARY:")
+                print(f"\nSESSION SUMMARY:")
+                logger.info("SESSION SUMMARY:")
                 print(f"Duration: {summary['session_duration_minutes']} minutes")
                 logger.info(f"Duration: {summary['session_duration_minutes']} minutes")
                 print(f"Total TRIMP: {summary['total_trimp']}")
@@ -1612,23 +1759,19 @@ if __name__ == "__main__":
                 logger.info(f"TRIMP Zone: {summary['trimp_zone']} - {summary['zone_description']}")
                 print(f"Average Stress: {summary['avg_stress']}%")
                 logger.info(f"Average Stress: {summary['avg_stress']}%")
-                print(f"Final Fitness Level: {summary['final_fitness_level']}%")
-                logger.info(f"Final Fitness Level: {summary['final_fitness_level']}%")
-                print(f"Final Hydration Level: {summary['final_hydration_level']}%")
-                logger.info(f"Final Hydration Level: {summary['final_hydration_level']}%")
                 print(f"G-Impact Events: {summary['g_impact_count']}")
                 logger.info(f"G-Impact Events: {summary['g_impact_count']}")
                 
-                print(f"\n⏰ RECOVERY RECOMMENDATIONS:")
-                logger.info("⏰ RECOVERY RECOMMENDATIONS:")
+                print(f"\nRECOVERY RECOMMENDATIONS:")
+                logger.info("RECOVERY RECOMMENDATIONS:")
                 print(f"Recovery Time: {summary['recovery_time']}")
                 logger.info(f"Recovery Time: {summary['recovery_time']}")
                 for i, rec in enumerate(summary['recovery_recommendations'], 1):
                     print(f"  {i}. {rec}")
                     logger.info(f"  {i}. {rec}")
                 
-                print(f"\n💪 TRAINING RECOMMENDATIONS:")
-                logger.info("💪 TRAINING RECOMMENDATIONS:")
+                print(f"\nTRAINING RECOMMENDATIONS:")
+                logger.info("TRAINING RECOMMENDATIONS:")
                 for i, rec in enumerate(summary['training_recommendations'], 1):
                     print(f"  {i}. {rec}")
                     logger.info(f"  {i}. {rec}")
@@ -1650,8 +1793,22 @@ if __name__ == "__main__":
                 print(f"\n Session summary saved to {player_folder}/{summary_filename}")
                 logger.info(f" Session summary saved to {player_folder}/{summary_filename}")
                 
-                # Final memory usage
+                # Final memory usage and cache statistics
                 print_detailed_memory_usage(" (session end)")
+                
+                # Show final dynamic model loader statistics
+                final_cache_info = model_loader.get_cache_info()
+                print(f"\n🧠 DYNAMIC MODEL LOADER FINAL STATISTICS:")
+                print(f"   Models loaded: {final_cache_info['models_loaded']}")
+                print(f"   Models evicted: {final_cache_info['models_evicted']}")
+                print(f"   Cache hit rate: {final_cache_info['cache_hit_rate']:.1%}")
+                print(f"   Total requests: {final_cache_info['total_requests']}")
+                print(f"   Average load time: {final_cache_info['average_load_time']:.2f}s")
+                print(f"   Final cache size: {final_cache_info['cache_size']}/{final_cache_info['max_cache_size']}")
+                print(f"   Available models: {final_cache_info['available_models']}")
+                
+                logger.info(f"Dynamic Model Loader Final Stats: {final_cache_info}")
+                
                 print("="*60)
                 logger.info("="*60)
                 logger.info("=== SESSION COMPLETED ===")
@@ -1660,76 +1817,10 @@ if __name__ == "__main__":
                 remove_prediction_lockfile()
                 break  # Exit the loop after generating summary
         
-        # Check for 5-second warning - check if ANY device has received data recently
-        else:
-            current_time = time.time()
-            
-            # Periodic MQTT status report (every 30 seconds)
-            if current_time - mqtt_last_status_report >= 30:
-                mqtt_status = "🟢 Connected" if mqtt_connected else "🔴 Disconnected"
-                if mqtt_connected:
-                    uptime = current_time - mqtt_last_connect_time
-                    print(f"📡 MQTT: {mqtt_status} ({uptime:.0f}s uptime)")
-                else:
-                    downtime = current_time - mqtt_last_disconnect_time if mqtt_last_disconnect_time > 0 else 0
-                    print(f"📡 MQTT: {mqtt_status} ({downtime:.0f}s downtime, {mqtt_reconnect_attempts} attempts)")
-                mqtt_last_status_report = current_time
-            
-            # Find the most recent data time across all devices
-            most_recent_data_time = 0
-            active_devices = 0
-            inactive_devices = 0
-            
-            for device_id, ctx in device_contexts.items():
-                device_last_data = ctx.get("last_data_time", 0)
-                if device_last_data > 0:  # Only count devices that have received data
-                    time_since_device_data = current_time - device_last_data
-                    if time_since_device_data <= 10:  # Device is active if data within last 10 seconds
-                        active_devices += 1
-                        if device_last_data > most_recent_data_time:
-                            most_recent_data_time = device_last_data
-                    else:
-                        inactive_devices += 1  # Device hasn't sent data recently
-            
-            # Debug: Show timing information
-            time_since_last_data = current_time - most_recent_data_time if most_recent_data_time > 0 else float('inf')
-            
-            # Show status information periodically
-            if current_time - last_warning_time >= 30:  # Show status every 30 seconds
-                if active_devices > 0:
-                    status_msg = f"Active Devices: {active_devices}"
-                    print(f"─" * 45, "📊", status_msg, "─" * 45)
-                    # Only log status changes, not every status update
-                last_warning_time = current_time
-            
-            # Check for different warning scenarios
-            if active_devices == 0 and time_since_last_data > 5:
-                # Only print warning every 5 seconds, not every loop iteration
-                if current_time - last_warning_time >= 5:
-                    # Show MQTT connection status
-                    mqtt_status = "🟢 Connected" if mqtt_connected else "🔴 Disconnected"
-                    mqtt_uptime = current_time - mqtt_last_connect_time if mqtt_connected else 0
-                    
-                    if inactive_devices > 0:
-                        # Some devices were active but are now inactive
-                        warning_msg = f"No active sensor data - {inactive_devices} device(s) inactive for {time_since_last_data:.0f}s"
-                        print(f"⚠️  {warning_msg}")
-                        logger.warning(warning_msg)
-                    else:
-                        # No devices have ever received data (publisher not running)
-                        warning_msg = "No sensor data received - waiting for publisher to start..."
-                        print(f"⚠️  {warning_msg}")
-                        logger.warning(warning_msg)
-                    
-                    print(f"📡 MQTT: {mqtt_status}")
-                    if mqtt_connected:
-                        print(f"📡 Uptime: {mqtt_uptime:.0f}s, Reconnects: {mqtt_reconnect_attempts}")
-                    else:
-                        downtime = current_time - mqtt_last_disconnect_time if mqtt_last_disconnect_time > 0 else 0
-                        print(f"📡 Downtime: {downtime:.0f}s, Attempts: {mqtt_reconnect_attempts}")
-                    print_memory_usage(" (waiting)")
-                    logger.warning(f"No active sensor data - {inactive_devices} device(s) inactive for {time_since_last_data:.1f} seconds. MQTT: {mqtt_status}")
-                    last_warning_time = current_time
+        # Active device monitoring (runs regardless of session end status)
+        # MQTT status reporting removed to reduce verbosity
+        
+        # Active device monitoring removed to reduce verbosity
     
 # Initial memory usage
 print_detailed_memory_usage(" (startup)")

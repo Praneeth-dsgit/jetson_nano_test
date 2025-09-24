@@ -20,7 +20,7 @@ import sys
 # -----------------------------
 # Configuration Loading
 # -----------------------------
-def load_config(config_path: str = "jetson_config.yaml") -> Dict[str, Any]:
+def load_config(config_path: str = "jetson_nano_4gb_config.yaml") -> Dict[str, Any]:
     """Load configuration from YAML file."""
     try:
         with open(config_path, 'r') as file:

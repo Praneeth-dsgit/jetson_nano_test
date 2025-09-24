@@ -2,6 +2,14 @@
 """
 Jetson Nano Deployment Helper Script
 This script helps deploy and manage the ML training system on Jetson Nano.
+Uses jetson_nano_4gb_config.yaml for optimized Jetson Nano 4GB settings.
+
+Commands:
+- check: Validate required packages are installed
+- setup: Create necessary directories and validate configuration
+- run: Run the ML training system
+- status: Show system status and configuration
+- validate: Validate configuration file structure
 """
 
 import os
@@ -34,7 +42,7 @@ def check_requirements():
 
 def create_directories():
     """Create necessary directories for the system."""
-    config_path = "jetson_config.yaml"
+    config_path = "jetson_nano_4gb_config.yaml"
     
     if not os.path.exists(config_path):
         print(f"[ERROR] Configuration file {config_path} not found!")
@@ -58,20 +66,24 @@ def create_directories():
 
 def validate_config():
     """Validate the configuration file."""
-    config_path = "jetson_config.yaml"
+    config_path = "jetson_nano_4gb_config.yaml"
+    
+    if not os.path.exists(config_path):
+        print(f"[ERROR] Configuration file {config_path} not found!")
+        return False
     
     try:
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         
-        # Check required sections
-        required_sections = ['paths', 'training', 'monitoring', 'jetson', 'backup', 'retraining']
+        # Check required sections (updated for jetson_nano_4gb_config.yaml)
+        required_sections = ['paths', 'training', 'monitoring', 'jetson', 'backup', 'retraining', 'model_loading']
         for section in required_sections:
             if section not in config:
                 print(f"[ERROR] Missing configuration section: {section}")
                 return False
         
-        print("[INFO] Configuration file is valid")
+        print(f"[INFO] Configuration file {config_path} is valid")
         return True
         
     except Exception as e:
@@ -93,18 +105,25 @@ def run_training():
 
 def show_status():
     """Show system status."""
-    config_path = "jetson_config.yaml"
+    config_path = "jetson_nano_4gb_config.yaml"
     
     if not os.path.exists(config_path):
-        print("[ERROR] Configuration file not found")
+        print(f"[ERROR] Configuration file {config_path} not found!")
         return
     
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     
-    print("\n=== Jetson Nano ML Training System Status ===")
-    print(f"Environment: {config['deployment']['environment']}")
-    print(f"Version: {config['deployment']['version']}")
+    print(f"\n=== Jetson Nano ML Training System Status ({config_path}) ===")
+    
+    # Show deployment info if available
+    if 'deployment' in config:
+        print(f"Environment: {config['deployment']['environment']}")
+        print(f"Version: {config['deployment']['version']}")
+    else:
+        print("Environment: Jetson Nano 4GB Optimized")
+        print("Version: 4GB Optimized Configuration")
+    
     print(f"Training Parameters:")
     print(f"  - n_estimators: {config['training']['n_estimators']}")
     print(f"  - max_depth: {config['training']['max_depth']}")
@@ -117,11 +136,22 @@ def show_status():
     print(f"  - device_detection: {config['jetson']['device_detection']}")
     print(f"  - memory_limit: {config['jetson']['memory_limit_mb']}MB")
     print(f"  - gpu_memory_fraction: {config['jetson']['gpu_memory_fraction']}")
-    print(f"Feature Engineering:")
-    print(f"  - enabled: {config['feature_engineering']['enabled']}")
-    print(f"  - rolling_window: {config['feature_engineering']['rolling_window']}")
-    print(f"  - sampling_frequency: {config['feature_engineering']['sampling_frequency']}")
-    print(f"  - features: {list(config['feature_engineering']['features'].keys())}")
+    
+    # Show feature engineering if available
+    if 'feature_engineering' in config:
+        print(f"Feature Engineering:")
+        print(f"  - enabled: {config['feature_engineering']['enabled']}")
+        print(f"  - rolling_window: {config['feature_engineering']['rolling_window']}")
+        print(f"  - sampling_frequency: {config['feature_engineering']['sampling_frequency']}")
+        print(f"  - features: {list(config['feature_engineering']['features'].keys())}")
+    
+    # Show dynamic model loading configuration if available
+    if 'model_loading' in config:
+        print(f"Dynamic Model Loading:")
+        print(f"  - cache_size: {config['model_loading']['cache_size']}")
+        print(f"  - device: {config['model_loading']['device']}")
+        print(f"  - models_directory: {config['model_loading']['models_directory']}")
+        print(f"  - enable_memory_monitoring: {config['model_loading']['enable_memory_monitoring']}")
     
     # Check directories
     print(f"\nDirectories:")

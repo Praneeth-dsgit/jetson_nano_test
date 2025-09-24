@@ -1,6 +1,6 @@
 # Jetson Nano 4GB Optimized Configuration
 # This configuration is specifically tuned for Jetson Nano 4GB hardware
-# Copy this to jetson_config.yaml on your Jetson Nano for optimal performance
+# This is the main configuration file for Jetson Nano 4GB optimized performance
 
 paths:
   data_root: 'athlete_training_data'
@@ -53,7 +53,7 @@ logging:
   log_to_file: true
   log_file: 'jetson_training.log'
   console_output: true
-  detailed_progress: false     # Reduced logging for performance
+  detailed_progress: true      # Enable detailed logging for metrics display
   logs_dir: './logs'
 
 # Memory-Efficient Feature Engineering
@@ -86,3 +86,87 @@ performance:
   temperature_critical_threshold: 80   # Celsius
   memory_warning_threshold: 85         # Percentage
   auto_performance_mode: true          # Enable nvpmodel -m 0 equivalent
+
+# Dynamic Model Loading Configuration
+# Optimized for Jetson Nano 4GB memory constraints
+model_loading:
+  # Directory containing model files
+  models_directory: 'athlete_models_tensors_updated'
+  
+  # Maximum number of models to keep in memory (LRU cache)
+  # Optimized for 4GB Jetson Nano - smaller cache to save memory
+  cache_size: 3
+  
+  # Target device for model inference
+  # Using CUDA for GPU acceleration on Jetson Nano 4GB
+  device: 'cuda'
+  
+  # Enable memory monitoring and logging
+  enable_memory_monitoring: true
+  
+  # Preload models for specific players (optional)
+  # Set to null or empty list to disable preloading
+  preload_players: null  # Example: [1, 2, 3]
+
+# Memory Optimization Settings (Jetson Nano 4GB specific)
+memory_optimization:
+  # Maximum memory usage threshold (MB) - conservative for 4GB system
+  max_memory_mb: 1200
+  
+  # Memory check interval (seconds)
+  memory_check_interval: 30
+  
+  # Enable automatic cache clearing when memory is low
+  auto_clear_on_low_memory: true
+
+# Performance Settings (Jetson Nano 4GB optimized)
+model_performance:
+  # Enable model preloading for better performance
+  enable_preloading: false  # Disabled to save memory
+  
+  # Maximum number of models to preload concurrently
+  max_concurrent_preload: 2  # Reduced for 4GB system
+  
+  # Enable model warming (test prediction on load)
+  enable_model_warming: true
+
+# Model Loading Logging Settings
+model_logging:
+  # Log level for dynamic model loader
+  # Options: DEBUG, INFO, WARNING, ERROR
+  log_level: 'INFO'
+  
+  # Enable detailed cache statistics logging
+  enable_cache_stats: true
+  
+  # Log memory usage every N model loads
+  memory_log_interval: 10
+
+# Jetson Nano 4GB Specific Model Loading Optimizations
+jetson_model_optimization:
+  # Enable Jetson-specific optimizations
+  enabled: true
+  
+  # Reduce cache size for Jetson Nano 4GB
+  jetson_nano_cache_size: 3
+  
+  # Enable CUDA mode on Jetson Nano 4GB for GPU acceleration
+  force_cpu_on_jetson: false
+  
+  # Enable memory pressure monitoring
+  enable_memory_pressure_monitoring: true
+  
+  # Conservative memory limits for 4GB system
+  max_model_memory_mb: 200  # Per model memory limit
+  total_model_memory_mb: 600  # Total memory for all models
+
+# Environment Variables (can be overridden)
+environment:
+  # Override cache size via environment variable
+  MODEL_CACHE_SIZE: 3  # Optimized for 4GB Jetson Nano
+  
+  # Override device via environment variable
+  MODEL_DEVICE: 'cuda'  # Use CUDA on Jetson Nano 4GB
+  
+  # Override models directory via environment variable
+  MODEL_DIRECTORY: 'athlete_models_tensors_updated'

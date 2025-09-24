@@ -6,6 +6,9 @@ Supports two distinct modes:
 1. TRAINING MODE: Structured training sessions with predictable patterns
 2. GAME MODE: Dynamic game scenarios with realistic match conditions
 
+This publisher works with the dynamic model loading system in test_30_players.py,
+which loads models on-demand based on player/device IDs to save memory on Jetson Nano.
+
 Usage:
     python publisher.py <num_players> [--mode training|game] [--duration minutes] [--players list]
     
@@ -17,6 +20,9 @@ Examples:
     python publisher.py --players [1,3,7] --mode training     # Training mode for specific players 1,3,7
 
 When stopped (Ctrl+C), saves data to appropriate folders based on mode
+
+Note: This publisher generates sensor data that is consumed by test_30_players.py,
+which uses dynamic model loading to efficiently manage ML models in memory.
 """
 
 import paho.mqtt.client as mqtt
@@ -576,6 +582,15 @@ class MultiModeDataPublisher:
             print("🔄 Starting MQTT network loop...")
             self.client.loop_start()
             
+            # Wait a moment for connection to establish
+            time.sleep(2)
+            
+            # Verify MQTT connection
+            if self.client.is_connected():
+                print("✅ MQTT network loop started successfully")
+            else:
+                print("⚠️ MQTT network loop started but not connected")
+            
             # Wait a moment for initial connection to establish
             time.sleep(1)
             
@@ -603,6 +618,9 @@ class MultiModeDataPublisher:
                         continue
                 
                 # Generate and publish data for each selected player
+                if self.selected_players and len(self.player_data[list(self.selected_players)[0]]) % 200 == 0:  # Show status every 200 messages
+                    print(f"🔄 Processing {len(self.selected_players)} players, MQTT connected: {self.client.is_connected()}")
+                
                 for player_id in self.selected_players:
                     try:
                         # Generate sensor data
@@ -615,9 +633,15 @@ class MultiModeDataPublisher:
                         topic = f"player/{sensor_data['device_id']}/sensor/data"
                         result = self.client.publish(topic, json.dumps(sensor_data), qos=1)
                         
+                        # Debug: Show publishing status
+                        if len(self.player_data[player_id]) % 50 == 0:  # Show every 50th message
+                            print(f"📤 Publishing to topic: {topic} for player {player_id}")
+                        
                         # Check if publish was successful
                         if result.rc != mqtt.MQTT_ERR_SUCCESS:
                             print(f"⚠️ Failed to publish for player {player_id}: {result.rc}")
+                        elif len(self.player_data[player_id]) % 50 == 0:
+                            print(f"✅ Successfully published to {topic}")
                         
                         # Show progress occasionally
                         if len(self.player_data[player_id]) % 100 == 0:
