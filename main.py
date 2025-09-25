@@ -508,6 +508,8 @@ FS_HZ = 10.0                                    # Sampling frequency (Hz)
 WINDOW_SECONDS = 3                              # Feature window duration (seconds)
 WINDOW_SAMPLES = int(WINDOW_SECONDS * FS_HZ)    # Samples per window
 ROLLING_WINDOW_SIZE = 30                        # Main rolling window size
+HRV_WINDOW_SECONDS = 10                         # HRV window duration (seconds)
+HRV_WINDOW_SAMPLES = int(HRV_WINDOW_SECONDS * FS_HZ)
 
 # G-Impact Detection Parameters
 G_IMPACT_ACC_THRESHOLD = 8 * 9.81               # 8g threshold (m/s²)
@@ -555,6 +557,7 @@ gyro_mag_history = deque(maxlen=5)
 # Stress and Energy Tracking
 stress_buffer = []                              # Stress Buffer    
 TEE_buffer = []                                 # Total Energy Expenditure
+hrv_hr_buffer = deque(maxlen=HRV_WINDOW_SAMPLES) # Dedicated HRV buffer (10s)
 
 # TRIMP (Training Impulse) Tracking
 trimp_buffer = []                                # TRIMP Buffer
@@ -1245,45 +1248,40 @@ def process_data():
     ]
 
 
-    # Dynamic model loading - only predict for the current device's model
-    # This saves significant memory compared to batch predictions across all models
-    device_model = None
-    try:
-        device_idx = int(str(device_id).lstrip("0") or "0")
-    except Exception:
-        device_idx = 0
-    
-    # Only proceed if a model exists for this specific device/player
-    if device_idx <= 0 or not model_loader.is_model_available(device_idx):
-        print(f"Skipping Player {athlete_id} (Device {device_id}) - no model available")
-        logger.info(f"Skipping device {device_id} - no model available")
-        return
+    # Determine mode early and avoid ML usage entirely in training mode
+    mode = sensor_data.get("mode", "game")
 
-    # Get model for this device (loads on-demand if not in cache)
-    device_model = model_loader.get_model(device_idx)
-    if device_model is None:
-        print(f"Skipping Player {athlete_id} (Device {device_id}) - model failed to load")
-        logger.warning(f"Device {device_id} model failed to load")
-        return
-
-    # Check if we're in training mode (use actual HR) or game mode (predict HR)
-    mode = sensor_data.get("mode", "game")  # Default to game mode if not specified
-    
     if mode == "training":
-        # In training mode, use actual heart rate from sensors
         actual_hr = sensor_data.get("heart_rate_bpm")
-        if actual_hr is not None:
-            predicted_hr = round(float(actual_hr), 0)
-            # Training mode processing (logged only on first use per device)
-        else:
-            # Fallback to prediction if no actual HR available
-            logger.warning(f"Training Mode - Device {device_id}: No actual HR found, falling back to ML prediction")
-            mode = "game"  # Switch to prediction mode
-    
-    if mode == "game":
+        if actual_hr is None:
+            print(f"Training mode: no actual HR for Player {athlete_id} (Device {device_id}); skipping this sample")
+            logger.warning(f"Training mode: missing heart_rate_bpm for device {device_id}")
+            return
+        predicted_hr = round(float(actual_hr), 0)
+    else:
+        # Dynamic model loading - only predict for the current device's model
+        # This saves significant memory compared to batch predictions across all models
+        device_model = None
+        try:
+            device_idx = int(str(device_id).lstrip("0") or "0")
+        except Exception:
+            device_idx = 0
+
+        # Only proceed if a model exists for this specific device/player
+        if device_idx <= 0 or not model_loader.is_model_available(device_idx):
+            print(f"Skipping Player {athlete_id} (Device {device_id}) - no model available")
+            logger.info(f"Skipping device {device_id} - no model available")
+            return
+
+        # Get model for this device (loads on-demand if not in cache)
+        device_model = model_loader.get_model(device_idx)
+        if device_model is None:
+            print(f"Skipping Player {athlete_id} (Device {device_id}) - model failed to load")
+            logger.warning(f"Device {device_id} model failed to load")
+            return
+
         # In game mode, predict heart rate using the dynamically loaded model
         device_type = "CUDA" if DEVICE == "cuda" else "CPU"
-        
         try:
             predicted_hr = float(predict_with_adaptive_input(device_model, features)[0])
             predicted_hr = round(predicted_hr, 0)
@@ -1294,6 +1292,7 @@ def process_data():
 
 
     hr_buffer.append(predicted_hr)
+    hrv_hr_buffer.append(predicted_hr)
 
     # Display activity metrics for every prediction (moved above heart rate)
     current_acc_display = acc_buffer[-1] if len(acc_buffer) > 0 else (acc_mag_buffer[-1] if len(acc_mag_buffer) > 0 else 0.0)
@@ -1309,10 +1308,10 @@ def process_data():
     else:
         print(f"Heart Rate: {predicted_hr} bpm (predicted) | Mode: {mode}")
     
-    # Display HRV if available (need at least 5 values for RMSSD calculation)
-    if len(hr_buffer) >= 5:
-        current_hrv = calculate_rmssd(list(hr_buffer)[-min(10, len(hr_buffer)):])
-        print(f"HRV (RMSSD): {current_hrv:.1f} ms")
+    # Display HRV (single source): 10-second window if available
+    if len(hrv_hr_buffer) >= 5:
+        current_hrv = calculate_rmssd(hrv_hr_buffer)
+        print(f"HRV (RMSSD, 10s): {current_hrv:.1f} ms")
     else:
         print(f"HRV (RMSSD): Calculating... (need {5 - len(hr_buffer)} more readings)")
     
@@ -1326,7 +1325,7 @@ def process_data():
 
     # Robust stress calculation using rolling means
     if len(hr_buffer) == ROLLING_WINDOW_SIZE:
-        hrv_rmssd = calculate_rmssd(hr_buffer)
+        hrv_rmssd = calculate_rmssd(hrv_hr_buffer)
         acc_mean = np.mean(acc_buffer)
         gyro_mean = np.mean(gyro_buffer)
         hr_mean = np.mean(hr_buffer)
@@ -1339,7 +1338,6 @@ def process_data():
             "High"
         )
         print(f"Stress: {stress_percent:.1f}% (avg: {avg_stress:.1f}%) - {stress_label}")
-        print(f"HRV: {hrv_rmssd:.1f} ms | HR: {hr_mean:.0f} bpm")
     else:
         hrv_rmssd = 0
         stress_percent = 0
