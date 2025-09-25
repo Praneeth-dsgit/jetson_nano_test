@@ -1253,18 +1253,18 @@ def process_data():
     except Exception:
         device_idx = 0
     
-    # Map device_idx to available model range
-    if device_idx > max_available_models:
-        device_idx = (device_idx % max_available_models) + 1
-        # Device mapping handled silently to reduce verbosity
-    elif device_idx == 0:
-        device_idx = 1  # Default to model 1 if device_id is 0
-    
+    # Only proceed if a model exists for this specific device/player
+    if device_idx <= 0 or not model_loader.is_model_available(device_idx):
+        print(f"Skipping Player {athlete_id} (Device {device_id}) - no model available")
+        logger.info(f"Skipping device {device_id} - no model available")
+        return
+
     # Get model for this device (loads on-demand if not in cache)
     device_model = model_loader.get_model(device_idx)
     if device_model is None:
-        # Silently use default model to reduce verbosity
-        device_model = default_model
+        print(f"Skipping Player {athlete_id} (Device {device_id}) - model failed to load")
+        logger.warning(f"Device {device_id} model failed to load")
+        return
 
     # Check if we're in training mode (use actual HR) or game mode (predict HR)
     mode = sensor_data.get("mode", "game")  # Default to game mode if not specified
@@ -1286,9 +1286,11 @@ def process_data():
         
         try:
             predicted_hr = float(predict_with_adaptive_input(device_model, features)[0])
-        except Exception:
-            predicted_hr = float(predict_with_adaptive_input(default_model, features)[0])
-        predicted_hr = round(predicted_hr, 0)
+            predicted_hr = round(predicted_hr, 0)
+        except Exception as e:
+            print(f"Prediction failed for Player {athlete_id} (Device {device_id}): {e}")
+            logger.error(f"Prediction failed for device {device_id}: {e}")
+            return
 
 
     hr_buffer.append(predicted_hr)

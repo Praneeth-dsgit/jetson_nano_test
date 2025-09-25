@@ -635,7 +635,7 @@ class MultiModeDataPublisher:
                         
                         # Debug: Show publishing status
                         if len(self.player_data[player_id]) % 50 == 0:  # Show every 50th message
-                            print(f"📤 Publishing to topic: {topic} for player {player_id}")
+                            print(f"📤 Publishing to topic: {topic} for player {player_id} | elapsed: {(datetime.now() - self.session_start_time).total_seconds():.1f}s")
                         
                         # Check if publish was successful
                         if result.rc != mqtt.MQTT_ERR_SUCCESS:
