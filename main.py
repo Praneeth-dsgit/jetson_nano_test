@@ -372,29 +372,32 @@ USE_CUDA = os.getenv("USE_CUDA", "1")
 
 # Enhanced CUDA detection with better error handling
 def get_device():
-    """Safely determine the best device to use."""
-    if USE_CUDA in {"1", "true", "True"}:
-        try:
-            if torch.cuda.is_available():
-                # Test CUDA functionality
-                test_tensor = torch.tensor([1.0], device="cuda")
-                del test_tensor
-                torch.cuda.empty_cache()
-                print("CUDA is available and working")
-                logger.info("CUDA is available and working - GPU processing enabled")
-                return "cuda"
-            else:
-                print("CUDA requested but not available, falling back to CPU")
-                logger.warning("CUDA requested but not available, falling back to CPU")
-                return "cpu"
-        except Exception as e:
-            print(f"CUDA error detected: {e}")
-            print("Falling back to CPU processing")
-            logger.error(f"CUDA error detected: {e} - Falling back to CPU processing")
+    """Prefer CUDA automatically when available unless explicitly disabled."""
+    try:
+        # Respect explicit disable/force-CPU if provided
+        disable_cuda = os.getenv("DISABLE_CUDA", "").lower() in {"1", "true", "yes"}
+        force_cpu = (USE_CUDA or "").lower() in {"0", "false"}
+        if disable_cuda or force_cpu:
+            print("CUDA explicitly disabled; using CPU processing")
+            logger.info("CUDA explicitly disabled; using CPU processing")
             return "cpu"
-    else:
-        print("Using CPU processing")
-        logger.info("CUDA not requested, using CPU processing")
+
+        if torch.cuda.is_available():
+            # Test CUDA functionality
+            test_tensor = torch.tensor([1.0], device="cuda")
+            del test_tensor
+            torch.cuda.empty_cache()
+            print("CUDA is available and working")
+            logger.info("CUDA is available and working - GPU processing enabled")
+            return "cuda"
+        else:
+            print("CUDA not available; using CPU processing")
+            logger.warning("CUDA not available; using CPU processing")
+            return "cpu"
+    except Exception as e:
+        print(f"CUDA error detected: {e}")
+        print("Falling back to CPU processing")
+        logger.error(f"CUDA error detected: {e} - Falling back to CPU processing")
         return "cpu"
 
 def create_prediction_lockfile():
