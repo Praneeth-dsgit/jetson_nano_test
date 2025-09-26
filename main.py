@@ -452,20 +452,6 @@ logger.info(f"Dynamic Model Loader: Cache size {CACHE_SIZE}, Device {MODEL_DEVIC
 logger.info(f"Dynamic Model Loader: Found {max_available_models} available models")
 logger.info(f"Dynamic Model Loader: Available player IDs: {available_models}")
 
-# Load a default model for fallback (first available model)
-default_model = None
-if available_models:
-    default_model = model_loader.get_model(available_models[0])
-    if default_model:
-        print(f"Default fallback model loaded for player {available_models[0]}")
-        logger.info(f"Default fallback model loaded for player {available_models[0]}")
-    else:
-        print(f"Failed to load default fallback model")
-        logger.warning("Failed to load default fallback model")
-
-if default_model is None:
-    raise RuntimeError("No models found under athlete_models_tensors_updated/. Please add models.")
-
 print(f"Models will be loaded on-demand based on player/device IDs")
 print(f"Memory usage will be optimized with LRU cache eviction")
 logger.info("Dynamic model loading system ready - models will be loaded on-demand")
@@ -1304,23 +1290,26 @@ def process_data():
     actual_hr = sensor_data.get("heart_rate_bpm") if mode == "training" else None
     
     # Display heart rate information for every prediction
-    if actual_hr is not None:
-        print(f"Heart Rate: {actual_hr} bpm (actual) | {predicted_hr} bpm (predicted) | Mode: {mode}")
-    else:
+    if actual_hr is not None and mode == "training":
+        print(f"Heart Rate: {actual_hr} bpm (actual) | Mode: {mode}")
+    elif mode == "game":
         print(f"Heart Rate: {predicted_hr} bpm (predicted) | Mode: {mode}")
+    else:
+        print(f"Heart Rate: - bpm | Mode: {mode}")
 
-    # Show cache info every prediction
-    try:
-        cache_info = model_loader.get_cache_info()
-        print(
-            f"🧠 Cache: {cache_info['cache_size']}/{cache_info['max_cache_size']} | "
-            f"Hit: {cache_info['cache_hit_rate']:.1%} | "
-            f"Loaded: {cache_info['models_loaded']} | "
-            f"Evicted: {cache_info['models_evicted']} | "
-            f"Cached: {cache_info['cached_models']}"
-        )
-    except Exception:
-        pass
+    # Show cache info every prediction only in game mode
+    if mode == "game":
+        try:
+            cache_info = model_loader.get_cache_info()
+            print(
+                f"🧠 Cache: {cache_info['cache_size']}/{cache_info['max_cache_size']} | "
+                f"Hit: {cache_info['cache_hit_rate']:.1%} | "
+                f"Loaded: {cache_info['models_loaded']} | "
+                f"Evicted: {cache_info['models_evicted']} | "
+                f"Cached: {cache_info['cached_models']}"
+            )
+        except Exception:
+            pass
     
     # Display HRV (single source): 10-second window if available
     if len(hrv_hr_buffer) >= 5:
@@ -1612,6 +1601,11 @@ def on_message(client, userdata, msg):
         if device_id_str not in device_contexts:
             _init_device_context(device_id_str)
         ctx = device_contexts[device_id_str]
+        # Persist last seen mode for this device to support mode-specific summaries
+        try:
+            ctx["last_mode"] = mode
+        except Exception:
+            pass
         _load_context_to_globals(ctx)
         
         # Optionally update athlete profile from payload if provided
@@ -1725,12 +1719,14 @@ def check_session_end():
                 player_folder = f"A{str(athlete_id)}_{str(name)}"
                 full_player_path = os.path.join(base_output_dir, player_folder)
                 os.makedirs(full_player_path, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
-                summary_filename = f"A{athlete_id}_D{device_id}_session_summary_{timestamp}.json"
-                summary_filepath = os.path.join(full_player_path, summary_filename)
-                with open(summary_filepath, "w") as f:
-                    json.dump(summary, f, indent=2)
-                print(f"\n Session summary saved to {player_folder}/{summary_filename}")
+            timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+            device_mode = ctx.get("last_mode", "game")
+            mode_tag = "TR" if device_mode == "training" else "GM"
+            summary_filename = f"A{athlete_id}_D{device_id}_{mode_tag}_session_summary_{timestamp}.json"
+            summary_filepath = os.path.join(full_player_path, summary_filename)
+            with open(summary_filepath, "w") as f:
+                json.dump(summary, f, indent=2)
+            print(f"\n Session summary saved to {player_folder}/{summary_filename}")
 
             # Mark ended and persist back to context
             globals()["session_ended"] = True
@@ -1746,10 +1742,40 @@ if __name__ == "__main__":
     
     # Setup cleanup handler
     def cleanup_handler(signum, frame):
-        print("\n[INFO] Prediction interrupted. Cleaning up...")
-        remove_prediction_lockfile()
-        import sys
-        sys.exit(0)
+        print("\n[INFO] Prediction interrupted. Generating session summaries and cleaning up...")
+        try:
+            now_ts = time.time()
+            # Generate and save session summary for all devices that had any activity
+            for device_id_str, ctx in list(device_contexts.items()):
+                try:
+                    # Load context into globals to reuse summary pipeline
+                    _load_context_to_globals(ctx)
+                    # If session not marked ended, set end time to now
+                    if not ctx.get("session_ended", False):
+                        ctx["session_end_time"] = now_ts
+                        globals()["session_end_time"] = now_ts
+                        globals()["session_ended"] = True
+                        _save_globals_to_context(ctx)
+                    summary = generate_session_summary()
+                    if summary:
+                        base_output_dir = "prediction_outputs"
+                        player_folder = f"A{str(athlete_id)}_{str(name)}"
+                        full_player_path = os.path.join(base_output_dir, player_folder)
+                        os.makedirs(full_player_path, exist_ok=True)
+                        timestamp = datetime.now().strftime("%Y_%m_%d-%H_%M_%S")
+                        device_mode = ctx.get("last_mode", "game")
+                        mode_tag = "TR" if device_mode == "training" else "GM"
+                        summary_filename = f"A{athlete_id}_D{device_id}_{mode_tag}_session_summary_{timestamp}.json"
+                        summary_filepath = os.path.join(full_player_path, summary_filename)
+                        with open(summary_filepath, "w") as f:
+                            json.dump(summary, f, indent=2)
+                        print(f"Saved session summary for device {device_id_str} to {player_folder}/{summary_filename}")
+                except Exception as e:
+                    print(f"[WARN] Failed to save session summary for device {device_id_str}: {e}")
+        finally:
+            remove_prediction_lockfile()
+            import sys
+            sys.exit(0)
     
     import signal
     signal.signal(signal.SIGINT, cleanup_handler)
