@@ -368,7 +368,7 @@ if not logger.handlers:
 MQTT_BROKER = "localhost" 
 MQTT_PORT = 1883
 idle_time = os.getenv("IDLE_TIME", 300)
-USE_CUDA = os.getenv("USE_CUDA", "0")
+USE_CUDA = os.getenv("USE_CUDA", "1")
 
 # Enhanced CUDA detection with better error handling
 def get_device():
