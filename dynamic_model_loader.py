@@ -35,7 +35,7 @@ class DynamicModelLoader:
     def __init__(self, 
                  models_dir: str = "athlete_models_tensors_updated",
                  cache_size: int = 5,
-                 device: str = "cpu",
+                 device: str = "cuda",
                  enable_memory_monitoring: bool = True):
         """
         Initialize the dynamic model loader.
