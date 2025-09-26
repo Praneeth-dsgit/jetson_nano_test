@@ -33,6 +33,7 @@ logs_dir = config['logging']['logs_dir']
 device_contexts = {}
 current_mode = "unknown"  # Track current mode (training/game)
 prediction_logged_devices = set()  # Track which devices have had their first prediction logged
+active_game_devices = set()  # Track unique devices in game mode to scale cache size
 
 def _update_log_filename_if_needed(mode):
     """Create log file with mode when first detected."""
@@ -1307,6 +1308,19 @@ def process_data():
         print(f"Heart Rate: {actual_hr} bpm (actual) | {predicted_hr} bpm (predicted) | Mode: {mode}")
     else:
         print(f"Heart Rate: {predicted_hr} bpm (predicted) | Mode: {mode}")
+
+    # Show cache info every prediction
+    try:
+        cache_info = model_loader.get_cache_info()
+        print(
+            f"🧠 Cache: {cache_info['cache_size']}/{cache_info['max_cache_size']} | "
+            f"Hit: {cache_info['cache_hit_rate']:.1%} | "
+            f"Loaded: {cache_info['models_loaded']} | "
+            f"Evicted: {cache_info['models_evicted']} | "
+            f"Cached: {cache_info['cached_models']}"
+        )
+    except Exception:
+        pass
     
     # Display HRV (single source): 10-second window if available
     if len(hrv_hr_buffer) >= 5:
@@ -1563,6 +1577,31 @@ def on_message(client, userdata, msg):
         # Log device activity and detect mode
         mode = parsed_data.get("mode", "game")
         _update_log_filename_if_needed(mode)
+        # Dynamically scale model cache size based on active game-mode devices
+        try:
+            if mode == "game":
+                active_game_devices.add(device_id_str)
+                desired_cache_size = len(active_game_devices)
+                # Bound by number of available models
+                if desired_cache_size > model_loader.cache_size:
+                    new_cache_size = min(desired_cache_size, max_available_models)
+                    if new_cache_size != model_loader.cache_size:
+                        logger.info(
+                            f"Adjusting model cache size from {model_loader.cache_size} to {new_cache_size} (active game devices: {desired_cache_size})"
+                        )
+                        model_loader.cache_size = new_cache_size
+                        # Print cache info to console after resizing
+                        cache_info = model_loader.get_cache_info()
+                        print(
+                            f"🧠 Cache: {cache_info['cache_size']}/{cache_info['max_cache_size']} | "
+                            f"Hit: {cache_info['cache_hit_rate']:.1%} | "
+                            f"Loaded: {cache_info['models_loaded']} | "
+                            f"Evicted: {cache_info['models_evicted']} | "
+                            f"Cached: {cache_info['cached_models']}"
+                        )
+        except Exception:
+            # Do not interrupt message processing if scaling fails
+            pass
         
         # Only log device activity on first activation, not every message
         if device_id_str not in device_contexts:
