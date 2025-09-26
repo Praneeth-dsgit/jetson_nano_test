@@ -374,7 +374,7 @@ USE_CUDA = os.getenv("USE_CUDA", "1")
 def get_device():
     """Prefer CUDA automatically when available unless explicitly disabled."""
     try:
-        # Respect explicit disable/force-CPU if provided
+        ## Respect explicit disable/force-CPU if provided
         disable_cuda = os.getenv("DISABLE_CUDA", "").lower() in {"1", "true", "yes"}
         force_cpu = (USE_CUDA or "").lower() in {"0", "false"}
         if disable_cuda or force_cpu:
