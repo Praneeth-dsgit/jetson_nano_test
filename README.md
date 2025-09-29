@@ -38,7 +38,7 @@ The Jetson Nano ML Training System is a comprehensive athlete monitoring solutio
 | Component | Purpose | File |
 |-----------|---------|------|
 | **Data Publisher** | Generates realistic sensor data | `publisher.py` |
-| **Prediction Engine** | Real-time ML predictions | `test_30_players.py` |
+| **Prediction Engine** | Real-time ML predictions | `main.py` |
 | **Training System** | Automated ML model training | `sup_ml_rf_training.py` |
 | **Dynamic Model Loader** | Memory-efficient model management | `dynamic_model_loader.py` |
 | **Configuration** | Unified system settings | `jetson_nano_4gb_config.yaml` |
