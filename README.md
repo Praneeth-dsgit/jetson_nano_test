@@ -41,7 +41,7 @@ The Jetson Nano ML Training System is a comprehensive athlete monitoring solutio
 | **Prediction Engine** | Real-time ML predictions | `main.py` |
 | **Training System** | Automated ML model training | `sup_ml_rf_training.py` |
 | **Dynamic Model Loader** | Memory-efficient model management | `dynamic_model_loader.py` |
-| **Configuration** | Unified system settings | `jetson_nano_4gb_config.yaml` |
+| **Configuration** | Unified system settings | `jetson_orin_32gb_config.yaml` |
 | **Deployment Helper** | Setup and management | `jetson_deploy.py` |
 
 ---
@@ -145,7 +145,7 @@ python jetson_deploy.py validate
 
 ### Key Features
 
-- **Configuration**: Uses `jetson_nano_4gb_config.yaml` for optimized Jetson Nano 4GB settings (CUDA enabled)
+- **Configuration**: Uses `jetson_orin_32gb_config.yaml` for optimized Jetson Orin 32GB settings (CUDA enabled)
 - **Package validation**: Checks for required dependencies (numpy, pandas, scikit-learn, etc.)
 - **Directory setup**: Creates necessary folders for data and models
 - **Configuration validation**: Ensures config file structure is correct
@@ -157,7 +157,7 @@ python jetson_deploy.py validate
 ```bash
 $ python jetson_deploy.py status
 
-=== Jetson Nano ML Training System Status (jetson_nano_4gb_config.yaml) ===
+=== Jetson Orin ML Training System Status (jetson_orin_32gb_config.yaml) ===
 Environment: Jetson Nano 4GB Optimized
 Version: 4GB Optimized Configuration
 Training Parameters:
@@ -228,7 +228,7 @@ The Dynamic Model Loading System optimizes memory usage on resource-constrained 
 
 ### Configuration
 ```yaml
-# In jetson_nano_4gb_config.yaml
+# In jetson_orin_32gb_config.yaml
 model_loading:
   cache_size: 3                    # Optimized for 4GB Jetson Nano
   device: 'cpu'                    # Force CPU for memory efficiency
@@ -451,7 +451,7 @@ python3 jetson_deploy.py setup
 ```
 
 #### 4. Optimize for Jetson Nano 4GB
-Use the provided `jetson_nano_4gb_config.yaml` with optimized settings:
+Use the provided `jetson_orin_32gb_config.yaml` with optimized settings:
 - Reduced memory limits
 - Smaller batch sizes
 - Conservative GPU usage
@@ -467,7 +467,7 @@ Use the provided `jetson_nano_4gb_config.yaml` with optimized settings:
 
 ## ⚙️ Configuration Management
 
-### Unified Configuration File: `jetson_nano_4gb_config.yaml`
+### Unified Configuration File: `jetson_orin_32gb_config.yaml`
 
 All system settings are centralized in a single configuration file optimized for Jetson Nano 4GB:
 
@@ -565,7 +565,7 @@ netstat -an | grep 1883
 # Check memory usage
 free -h
 
-# Reduce batch size in jetson_nano_4gb_config.yaml
+# Reduce batch size in jetson_orin_32gb_config.yaml
 # batch_size: 500  (instead of 1000)
 
 # Use dynamic model loading (already enabled)
@@ -594,7 +594,7 @@ ls athlete_training_data/player_*/TR*.csv
 python test_dynamic_loading.py
 
 # Check cache configuration
-grep -A 10 "model_loading:" jetson_nano_4gb_config.yaml
+grep -A 10 "model_loading:" jetson_orin_32gb_config.yaml
 
 # Monitor memory usage
 python -c "from dynamic_model_loader import DynamicModelLoader; loader = DynamicModelLoader(); print(loader.get_cache_info())"
@@ -680,7 +680,7 @@ jetson_nano_test/                   # Project root directory
 │   ├── dynamic_model_loader.py    # Dynamic model loading system
 │   └── jetson_deploy.py           # Deployment helper script
 ├── Configuration
-│   ├── jetson_nano_4gb_config.yaml # Unified system configuration (4GB optimized)
+│   ├── jetson_orin_32gb_config.yaml # Unified system configuration (32GB optimized)
 │   └── requirements.txt           # Python dependencies
 ├── Training Data
 │   ├── athlete_training_data/     # Training data storage
@@ -829,7 +829,7 @@ For issues and questions:
 
 The system now provides:
 - ✅ **83% memory reduction** with dynamic model loading
-- ✅ **Jetson Nano 4GB optimized** configuration
+- ✅ **Jetson Orin 32GB optimized** configuration
 - ✅ **Real-time performance monitoring** for up to 30 athletes
 - ✅ **Automated ML training** with conflict prevention
 - ✅ **Comprehensive health metrics** and session management

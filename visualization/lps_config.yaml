@@ -1,0 +1,132 @@
+# LPS (Live Position System) Configuration
+# Configuration for real-time position tracking and visualization
+
+# MQTT Configuration
+mqtt:
+  broker: "localhost"
+  port: 1883
+  timeout: 60
+  keepalive: 60
+  reconnect_delay: 5
+
+# Device Configuration
+devices:
+  count: 30  # Number of devices to track (matches athlete system)
+  topic_patterns:
+    lps_specific: "lps/data/{device_id}"      # LPS-specific position data
+    legacy: "player/{device_id}/sensor/data"  # Legacy sensor data (may contain position)
+  position_timeout: 5.0  # Seconds before considering position stale
+
+# Field Configuration
+field:
+  # FIFA Standard Football Field Dimensions
+  length: 105.0  # meters
+  width: 60.0    # meters
+  
+  # Field Markings
+  center_circle_radius: 9.15  # meters
+  penalty_area:
+    length: 16.5   # meters
+    width: 40.3    # meters
+  goal_width: 7.32  # meters
+  
+  # Visualization
+  background_color: "#228B22"  # Forest green
+  line_color: "white"
+  goal_color: "yellow"
+
+# LPS Anchor Configuration
+anchors:
+  positions:
+    - [0, 0]                    # Bottom-left corner
+    - [105, 0]                  # Bottom-right corner  
+    - [105, 60]                 # Top-right corner
+    - [0, 60]                   # Top-left corner
+  color: "red"
+  size: 100
+  label: "LPS Anchors"
+
+# Visualization Settings
+visualization:
+  figure_size: [16, 10]  # [width, height] in inches
+  update_interval: 200   # milliseconds
+  player_marker:
+    color: "blue"
+    size: 8
+    label: "Players"
+  player_labels:
+    fontsize: 8
+    color: "blue"
+    weight: "bold"
+    offset: [1, 1]  # [x_offset, y_offset] from position
+
+# G-Impact Event Configuration
+g_impact:
+  log_pattern: "*/*_g_impact_log.json"  # Glob pattern for log files
+  marker:
+    color: "red"
+    marker: "D"  # Diamond
+    size: 100
+    label: "G-Impact Events"
+  labels:
+    fontsize: 8
+    color: "red"
+    weight: "bold"
+    offset: [1, 1]
+  show_fields: ["device_id", "athlete_id", "name"]  # Fields to show in labels
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "%(asctime)s - %(levelname)s - %(message)s"
+  file: null  # Set to filename to log to file, null for console only
+
+# Performance Settings
+performance:
+  max_fps: 10  # Maximum frames per second for animation
+  position_history_size: 100  # Number of historical positions to keep per device
+  enable_blit: false  # Blitting for performance (may cause issues on some systems)
+
+# Session Management
+session:
+  # Default session settings (can be overridden by command line)
+  default_duration_minutes: null  # null = unlimited, set to number for default limit
+  default_mode: "game"  # Default mode: "training" or "game"
+  auto_stop_on_duration: true  # Automatically stop when duration is reached
+  
+  # Status display settings
+  status_display:
+    enabled: true  # Show status overlay on field
+    position: [5, 55]  # [x, y] position on field (top-left corner)
+    fontsize: 10
+    color: "white"
+    background_color: "black"
+    background_alpha: 0.7
+    show_active_devices: true
+    show_elapsed_time: true
+    show_remaining_time: true
+    show_session_mode: true
+
+# Heatmap Analysis
+heatmap:
+  enabled: true  # Enable heatmap data collection
+  auto_save_on_exit: true  # Automatically save heatmap when session ends
+  bins: [30, 20]  # Number of bins for heatmap [x, y]
+  colormap: "hot"  # Matplotlib colormap for heatmap
+  alpha: 0.6  # Transparency of heatmap overlay
+  save_session_data: true  # Save raw position data to JSON file
+
+# Integration Settings
+integration:
+  # Integration with existing athlete monitoring system
+  use_athlete_profiles: true  # Load athlete names from existing system
+  athlete_data_path: "data/athlete_training_data"  # Path to athlete data
+  sync_with_main_system: true  # Sync device IDs with main system
+  
+  # Data format compatibility
+  position_fields:
+    x: "x"
+    y: "y"
+    device_id: "device_id"
+    athlete_id: "athlete_id"
+    timestamp: "timestamp"

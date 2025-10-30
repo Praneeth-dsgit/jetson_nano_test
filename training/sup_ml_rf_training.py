@@ -8,28 +8,47 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, mean_squared_error, mean_absolute_error, r2_score
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.preprocessing import StandardScaler
 from hummingbird.ml import convert
 import torch
 import onnx
 from scipy.fft import rfft, rfftfreq
 import psutil
+# Handle both relative and absolute imports
+try:
+    # Try relative imports first (when run as module)
+    from .model_version_manager import ModelVersionManager
+except ImportError:
+    # Fall back to absolute imports (when run directly)
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from training.model_version_manager import ModelVersionManager
 import signal
 import sys
 
 # -----------------------------
 # Configuration Loading
 # -----------------------------
-def load_config(config_path: str = "jetson_nano_4gb_config.yaml") -> Dict[str, Any]:
+def load_config(config_path: str = "../config/jetson_orin_32gb_config.yaml") -> Dict[str, Any]:
     """Load configuration from YAML file."""
     try:
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
-        print(f"[INFO] Loaded configuration from {config_path}")
-        return config
     except FileNotFoundError:
-        print(f"[WARN] Config file {config_path} not found, using default values")
-        return get_default_config()
+        # Fall back to absolute path (when run directly)
+        import os
+        abs_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'jetson_orin_32gb_config.yaml')
+        try:
+            with open(abs_config_path, 'r') as file:
+                config = yaml.safe_load(file)
+            print(f"[INFO] Loaded configuration from {abs_config_path}")
+            return config
+        except FileNotFoundError:
+            print(f"[WARN] Config file not found, using default values")
+            return get_default_config()
     except Exception as e:
         print(f"[ERROR] Failed to load config: {e}, using default values")
         return get_default_config()
@@ -38,10 +57,10 @@ def get_default_config() -> Dict[str, Any]:
     """Get default configuration if config file is not available."""
     return {
         'paths': {
-            'data_root': 'athlete_training_data',
-            'models_root': 'athlete_models_pkl',
-            'hb_tensors_updated': 'athlete_models_tensors_updated',
-            'hb_tensors_previous': 'athlete_models_tensors_previous',
+            'data_root': '../data/athlete_training_data',
+            'models_root': '../models/athlete_models_pkl',
+            'hb_tensors_updated': '../models/athlete_models_tensors_updated',
+            'hb_tensors_previous': '../models/athlete_models_tensors_previous',
             'data_file_pattern': '*.csv',
             'model_path': 'rf_model.pkl',
             'hb_path': 'hb_rf_model.zip',
@@ -506,6 +525,143 @@ def get_player_model_path(player_id: str, models_root: str = MODELS_ROOT) -> str
     return os.path.join(models_root, f"Player{player_id}_rf.pkl")
 
 
+def validate_model_performance(model, X, y, player_id: str) -> Dict[str, float]:
+    """
+    Validate model performance using cross-validation and multiple metrics.
+    
+    Args:
+        model: Trained model to validate
+        X: Feature matrix
+        y: Target values
+        player_id: Player ID for logging
+        
+    Returns:
+        Dictionary containing validation metrics
+    """
+    try:
+        # Split data for validation
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=None
+        )
+        
+        # Cross-validation scores
+        cv_scores = cross_val_score(model, X_train, y_train, cv=5, scoring='neg_mean_squared_error')
+        cv_rmse = np.sqrt(-cv_scores)
+        
+        # Test set predictions
+        y_pred = model.predict(X_test)
+        
+        # Calculate metrics
+        metrics = {
+            'cv_rmse_mean': float(np.mean(cv_rmse)),
+            'cv_rmse_std': float(np.std(cv_rmse)),
+            'test_rmse': float(np.sqrt(mean_squared_error(y_test, y_pred))),
+            'test_mae': float(mean_absolute_error(y_test, y_pred)),
+            'test_r2': float(r2_score(y_test, y_pred)),
+            'test_samples': len(y_test),
+            'cv_cv_score': float(np.mean(cv_scores))
+        }
+        
+        # Log validation results
+        print(f"[VALIDATION] Player {player_id} Model Performance:")
+        print(f"  Cross-validation RMSE: {metrics['cv_rmse_mean']:.2f} ± {metrics['cv_rmse_std']:.2f}")
+        print(f"  Test RMSE: {metrics['test_rmse']:.2f}")
+        print(f"  Test MAE: {metrics['test_mae']:.2f}")
+        print(f"  Test R²: {metrics['test_r2']:.3f}")
+        print(f"  Test samples: {metrics['test_samples']}")
+        
+        return metrics
+        
+    except Exception as e:
+        print(f"[ERROR] Model validation failed for player {player_id}: {e}")
+        return {
+            'cv_rmse_mean': float('inf'),
+            'cv_rmse_std': 0.0,
+            'test_rmse': float('inf'),
+            'test_mae': float('inf'),
+            'test_r2': -float('inf'),
+            'test_samples': 0,
+            'cv_cv_score': -float('inf')
+        }
+
+def check_training_data_quality(X, y, player_id: str) -> Dict[str, Any]:
+    """
+    Check training data quality and report issues.
+    
+    Args:
+        X: Feature matrix
+        y: Target values
+        player_id: Player ID for logging
+        
+    Returns:
+        Dictionary containing data quality metrics
+    """
+    quality_report = {
+        'sample_count': len(X),
+        'feature_count': X.shape[1] if len(X) > 0 else 0,
+        'missing_values': 0,
+        'outliers': 0,
+        'target_range': (float('inf'), -float('inf')),
+        'feature_ranges': {},
+        'quality_score': 1.0
+    }
+    
+    try:
+        # Check for missing values
+        if hasattr(X, 'isnull'):
+            missing_count = X.isnull().sum().sum()
+        else:
+            missing_count = np.isnan(X).sum() if len(X) > 0 else 0
+        quality_report['missing_values'] = int(missing_count)
+        
+        # Check target range
+        if len(y) > 0:
+            quality_report['target_range'] = (float(np.min(y)), float(np.max(y)))
+            
+            # Check for physiologically reasonable heart rate values
+            reasonable_hr = np.sum((y >= 40) & (y <= 220))
+            hr_quality = reasonable_hr / len(y) if len(y) > 0 else 0
+            quality_report['hr_quality'] = float(hr_quality)
+        
+        # Check feature ranges
+        if len(X) > 0 and X.shape[1] > 0:
+            for i in range(min(10, X.shape[1])):  # Check first 10 features
+                feature_data = X[:, i] if hasattr(X, 'shape') else X.iloc[:, i]
+                quality_report['feature_ranges'][f'feature_{i}'] = {
+                    'min': float(np.min(feature_data)),
+                    'max': float(np.max(feature_data)),
+                    'mean': float(np.mean(feature_data)),
+                    'std': float(np.std(feature_data))
+                }
+        
+        # Calculate overall quality score
+        quality_score = 1.0
+        if quality_report['sample_count'] < 100:
+            quality_score *= 0.8  # Penalty for small dataset
+        if quality_report['missing_values'] > 0:
+            quality_score *= 0.9  # Penalty for missing values
+        if quality_report.get('hr_quality', 1.0) < 0.95:
+            quality_score *= 0.7  # Penalty for unreasonable HR values
+        
+        quality_report['quality_score'] = quality_score
+        
+        # Log quality report
+        print(f"[DATA_QUALITY] Player {player_id} Training Data:")
+        print(f"  Samples: {quality_report['sample_count']}")
+        print(f"  Features: {quality_report['feature_count']}")
+        print(f"  Missing values: {quality_report['missing_values']}")
+        print(f"  HR quality: {quality_report.get('hr_quality', 1.0):.3f}")
+        print(f"  Overall quality score: {quality_score:.3f}")
+        
+        if quality_score < 0.7:
+            print(f"[WARN] Low data quality for player {player_id} (score: {quality_score:.3f})")
+        
+    except Exception as e:
+        print(f"[ERROR] Data quality check failed for player {player_id}: {e}")
+        quality_report['quality_score'] = 0.0
+    
+    return quality_report
+
 def train_and_save_player_model(player_id: str) -> None:
     # Convert player_id to directory name if needed
     if not player_id.startswith('player_'):
@@ -522,6 +678,14 @@ def train_and_save_player_model(player_id: str) -> None:
     X, y = load_player_dataset_latest_sessions(player_dir_name)
     print(f"[INFO] Training model for player {player_id} on {len(X)} samples from latest sessions...")
     
+    # Check training data quality
+    quality_report = check_training_data_quality(X, y, player_id)
+    
+    # Skip training if data quality is too poor
+    if quality_report['quality_score'] < 0.5:
+        print(f"[ERROR] Skipping training for player {player_id} due to poor data quality (score: {quality_report['quality_score']:.3f})")
+        return
+    
     # Backup previous models before updating (if enabled in config)
     if CONFIG['backup']['enabled'] and CONFIG['backup']['backup_on_update']:
         backup_previous_pkl_model(player_id)  # Backup PKL model
@@ -536,17 +700,86 @@ def train_and_save_player_model(player_id: str) -> None:
         n_jobs=N_JOBS,
     )
     model.fit(X, y)
-    model_path = get_player_model_path(player_id)
-    joblib.dump(model, model_path)
-    print(f"[INFO] Saved new player {player_id} PKL model to {model_path} (replaced old model)")
+    
+    # Validate model performance
+    validation_metrics = validate_model_performance(model, X, y, player_id)
+    
+    # Only save model if validation passes minimum thresholds
+    min_r2_threshold = CONFIG.get('retraining', {}).get('min_r2_threshold', 0.3)
+    max_rmse_threshold = CONFIG.get('retraining', {}).get('max_rmse_threshold', 50.0)
+    
+    if validation_metrics['test_r2'] >= min_r2_threshold and validation_metrics['test_rmse'] <= max_rmse_threshold:
+        model_path = get_player_model_path(player_id)
+        
+        # Backup current model before saving new one
+        try:
+            if os.path.exists(model_path):
+                backup_version_id = version_manager.backup_model(
+                    player_id=player_id,
+                    model_path=model_path,
+                    model_type="pkl",
+                    performance_metrics=validation_metrics,
+                    notes=f"Backup before training new model (R²: {validation_metrics['test_r2']:.3f})"
+                )
+                print(f"[INFO] Backed up previous model: {backup_version_id}")
+        except Exception as e:
+            print(f"[WARN] Failed to backup previous model: {e}")
+        
+        # Save new model
+        joblib.dump(model, model_path)
+        print(f"[INFO] Saved new player {player_id} PKL model to {model_path} (validation passed)")
 
-    # Also export to per-player Hummingbird tensor format
-    try:
-        hb_out = get_player_hb_path(player_id)
-        save_model_as_hb(model, X.shape[1], hb_out)
-        print(f"[INFO] Saved new player {player_id} HB model to {hb_out} (replaced old model)")
-    except Exception as e:
-        print(f"[WARN] Failed HB export for player {player_id}: {e}")
+        # Also export to per-player Hummingbird tensor format
+        try:
+            hb_out = get_player_hb_path(player_id)
+            
+            # Backup HB model if it exists
+            if os.path.exists(hb_out):
+                try:
+                    hb_backup_version_id = version_manager.backup_model(
+                        player_id=player_id,
+                        model_path=hb_out,
+                        model_type="hb",
+                        performance_metrics=validation_metrics,
+                        notes=f"Backup before training new HB model (R²: {validation_metrics['test_r2']:.3f})"
+                    )
+                    print(f"[INFO] Backed up previous HB model: {hb_backup_version_id}")
+                except Exception as e:
+                    print(f"[WARN] Failed to backup previous HB model: {e}")
+            
+            save_model_as_hb(model, X.shape[1], hb_out)
+            print(f"[INFO] Saved new player {player_id} HB model to {hb_out} (validation passed)")
+            
+            # Create version record for new models
+            try:
+                pkl_version_id = version_manager.backup_model(
+                    player_id=player_id,
+                    model_path=model_path,
+                    model_type="pkl",
+                    performance_metrics=validation_metrics,
+                    notes=f"New trained model (R²: {validation_metrics['test_r2']:.3f}, RMSE: {validation_metrics['test_rmse']:.2f})"
+                )
+                
+                hb_version_id = version_manager.backup_model(
+                    player_id=player_id,
+                    model_path=hb_out,
+                    model_type="hb",
+                    performance_metrics=validation_metrics,
+                    notes=f"New trained HB model (R²: {validation_metrics['test_r2']:.3f}, RMSE: {validation_metrics['test_rmse']:.2f})"
+                )
+                
+                print(f"[INFO] Created version records: PKL={pkl_version_id}, HB={hb_version_id}")
+                
+            except Exception as e:
+                print(f"[WARN] Failed to create version records: {e}")
+                
+        except Exception as e:
+            print(f"[WARN] Failed HB export for player {player_id}: {e}")
+    else:
+        print(f"[WARN] Model validation failed for player {player_id}:")
+        print(f"  R²: {validation_metrics['test_r2']:.3f} (min: {min_r2_threshold})")
+        print(f"  RMSE: {validation_metrics['test_rmse']:.2f} (max: {max_rmse_threshold})")
+        print(f"  Model not saved due to poor performance")
 
 
 def evaluate_existing_player_model(player_id: str) -> Tuple[float, int]:
@@ -785,6 +1018,18 @@ if __name__ == "__main__":
     # Setup logging first
     setup_logging()
     
+    # Initialize model version manager
+    print("Initializing model version manager...")
+    logger = logging.getLogger(__name__)
+    logger.info("Initializing model version manager for model backup and versioning")
+
+    version_manager = ModelVersionManager(
+        backup_root="model_backups",
+        db_path="model_versions.db",
+        max_versions_per_model=CONFIG.get('backup', {}).get('keep_previous_versions', 5),
+        enable_logging=True
+    )
+    
     # Print configuration summary
     print(f"[INFO] Jetson Nano ML Training")
     print(f"[INFO] Training params: n_estimators={N_ESTIMATORS}, max_depth={MAX_DEPTH}, n_jobs={N_JOBS}")
@@ -821,7 +1066,7 @@ if __name__ == "__main__":
     def get_player_session_info(idx: int) -> Tuple[str, List[str]]:
         """
         Return (player_id_str, session_files) for a player.
-        The data layout is athlete_training_data/player_{idx}/TR*_*.csv
+        The data layout is ../data/athlete_training_data/player_{idx}/TR*_*.csv
         We'll use the numeric index as the player_id for saving (1..30).
         """
         player_dir_name = f"player_{idx}"
@@ -923,6 +1168,19 @@ if __name__ == "__main__":
             print(f"[ERROR] Training failed for player {player_id_str}: {e}")
 
     print(f"[INFO] Startup scan complete. Retrained {retrained_count} player models.")
+    
+    # Show version management statistics
+    try:
+        vm_stats = version_manager.get_statistics()
+        print(f"[INFO] Version Management Statistics:")
+        print(f"  Total versions: {vm_stats['total_versions']}")
+        print(f"  Unique players: {vm_stats['unique_players']}")
+        print(f"  Active models: {vm_stats['status_counts'].get('active', 0)}")
+        print(f"  Backup models: {vm_stats['status_counts'].get('backup', 0)}")
+        print(f"  Models deployed: {vm_stats['stats']['models_deployed']}")
+        print(f"  Rollbacks performed: {vm_stats['stats']['rollbacks_performed']}")
+    except Exception as e:
+        print(f"[WARN] Failed to get version management stats: {e}")
     
     # Cleanup training lockfile
     remove_training_lockfile()

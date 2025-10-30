@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Jetson Nano Deployment Helper Script
-This script helps deploy and manage the ML training system on Jetson Nano.
-Uses jetson_nano_4gb_config.yaml for optimized Jetson Nano 4GB settings.
+Jetson Orin Deployment Helper Script
+This script helps deploy and manage the ML training system on Jetson Orin.
+Uses jetson_orin_32gb_config.yaml for optimized Jetson Orin 32GB settings.
 
 Commands:
 - check: Validate required packages are installed
@@ -42,7 +42,7 @@ def check_requirements():
 
 def create_directories():
     """Create necessary directories for the system."""
-    config_path = "jetson_nano_4gb_config.yaml"
+    config_path = "config/jetson_orin_32gb_config.yaml"
     
     if not os.path.exists(config_path):
         print(f"[ERROR] Configuration file {config_path} not found!")
@@ -66,7 +66,7 @@ def create_directories():
 
 def validate_config():
     """Validate the configuration file."""
-    config_path = "jetson_nano_4gb_config.yaml"
+    config_path = "config/jetson_orin_32gb_config.yaml"
     
     if not os.path.exists(config_path):
         print(f"[ERROR] Configuration file {config_path} not found!")
@@ -76,7 +76,7 @@ def validate_config():
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
         
-        # Check required sections (updated for jetson_nano_4gb_config.yaml)
+        # Check required sections (updated for jetson_orin_32gb_config.yaml)
         required_sections = ['paths', 'training', 'monitoring', 'jetson', 'backup', 'retraining', 'model_loading']
         for section in required_sections:
             if section not in config:
@@ -105,7 +105,7 @@ def run_training():
 
 def show_status():
     """Show system status."""
-    config_path = "jetson_nano_4gb_config.yaml"
+    config_path = "config/jetson_orin_32gb_config.yaml"
     
     if not os.path.exists(config_path):
         print(f"[ERROR] Configuration file {config_path} not found!")
@@ -114,15 +114,15 @@ def show_status():
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
     
-    print(f"\n=== Jetson Nano ML Training System Status ({config_path}) ===")
+    print(f"\n=== Jetson Orin ML Training System Status ({config_path}) ===")
     
     # Show deployment info if available
     if 'deployment' in config:
         print(f"Environment: {config['deployment']['environment']}")
         print(f"Version: {config['deployment']['version']}")
     else:
-        print("Environment: Jetson Nano 4GB Optimized")
-        print("Version: 4GB Optimized Configuration")
+        print("Environment: Jetson Orin 32GB Optimized")
+        print("Version: 32GB Optimized Configuration")
     
     print(f"Training Parameters:")
     print(f"  - n_estimators: {config['training']['n_estimators']}")
@@ -161,7 +161,7 @@ def show_status():
             print(f"  - {path}: {exists}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Jetson Nano ML Training Deployment Helper")
+    parser = argparse.ArgumentParser(description="Jetson Orin ML Training Deployment Helper")
     parser.add_argument("command", choices=["check", "setup", "run", "status", "validate"], 
                        help="Command to execute")
     

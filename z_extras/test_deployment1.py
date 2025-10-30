@@ -10,7 +10,7 @@ from ahrs.common.orientation import q2R
 from scipy.signal import butter, lfilter
 from scipy.fft import rfft, rfftfreq
 from datetime import datetime
-from db import db
+from database.db import db
 import os
 import logging
 warnings.filterwarnings("ignore")
@@ -24,7 +24,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-with open('jetson_nano_4gb_config.yaml', 'r') as f:
+with open('config/jetson_orin_32gb_config.yaml', 'r') as f:
     config = yaml.safe_load(f)
 
 logs_dir = config['logging']['logs_dir']

@@ -35,6 +35,8 @@ import csv
 import signal
 import argparse
 import math
+import subprocess
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Set, Tuple
 import glob
@@ -199,16 +201,20 @@ class MultiModeDataPublisher:
     
     def _setup_mode_specific_settings(self):
         """Setup mode-specific configuration."""
+        # Get project root directory (parent of communication folder)
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+        
         if self.mode == "training":
             self.session_type = "Training Session"
-            self.data_folder = "athlete_training_data"
+            self.data_folder = os.path.join(project_root, "data", "athlete_training_data")
             self.file_prefix = "TR"
             # Training sessions: structured phases
             self.phase_duration = 10 * 60  # 10-minute phases
             self.phases = ["warmup", "active", "cooldown"]
         else:  # game mode
             self.session_type = "Game Session"
-            self.data_folder = "athlete_game_data"
+            self.data_folder = os.path.join(project_root, "data", "athlete_game_data")
             self.file_prefix = "GM"
             # Game sessions: dynamic periods
             self.phase_duration = 45 * 60 if self.duration_minutes is None else (self.duration_minutes * 60) // 2
@@ -423,6 +429,51 @@ class MultiModeDataPublisher:
                           heart_rate: float, phase: str, intensity: str) -> Dict:
         """Create the sensor data dictionary."""
         
+        # Generate position data for LPS visualization
+        # FIFA field dimensions: 105m x 60m
+        field_length = 105.0
+        field_width = 60.0
+        
+        # Generate realistic position based on player position and movement
+        if not hasattr(self, '_player_positions'):
+            self._player_positions = {}
+        
+        player_id = profile["device_id"]
+        
+        # Initialize or update player position
+        if player_id not in self._player_positions:
+            # Start at random position on field
+            self._player_positions[player_id] = {
+                'x': random.uniform(10, field_length - 10),
+                'y': random.uniform(10, field_width - 10),
+                'last_update': time.time()
+            }
+        
+        # Update position with small random movement
+        current_time = time.time()
+        time_diff = current_time - self._player_positions[player_id]['last_update']
+        
+        # Movement speed (meters per second) - realistic for football players
+        max_speed = 8.0  # m/s (about 29 km/h)
+        movement_speed = random.uniform(0, max_speed * time_diff)
+        
+        # Random direction
+        angle = random.uniform(0, 2 * math.pi)
+        dx = movement_speed * math.cos(angle)
+        dy = movement_speed * math.sin(angle)
+        
+        # Update position
+        new_x = self._player_positions[player_id]['x'] + dx
+        new_y = self._player_positions[player_id]['y'] + dy
+        
+        # Keep within field bounds
+        new_x = max(5, min(field_length - 5, new_x))
+        new_y = max(5, min(field_width - 5, new_y))
+        
+        self._player_positions[player_id]['x'] = new_x
+        self._player_positions[player_id]['y'] = new_y
+        self._player_positions[player_id]['last_update'] = current_time
+        
         base_data = {
             "device_id": profile["device_id"],
             "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
@@ -437,13 +488,16 @@ class MultiModeDataPublisher:
             "gyro_x": gyro_x,
             "gyro_y": gyro_y,
             "gyro_z": gyro_z,
-        "mag_x": round(random.uniform(-65.0, 65.0), 2),
-        "mag_y": round(random.uniform(-65.0, 65.0), 2),
-        "mag_z": round(random.uniform(-65.0, 65.0), 2),
+            "mag_x": round(random.uniform(-65.0, 65.0), 2),
+            "mag_y": round(random.uniform(-65.0, 65.0), 2),
+            "mag_z": round(random.uniform(-65.0, 65.0), 2),
             "heart_rate_bpm": round(heart_rate, 1),
             "session_phase": phase,
             "intensity_level": intensity,
-            "mode": self.mode
+            "mode": self.mode,
+            # Add position data for LPS visualization
+            "x": round(new_x, 2),
+            "y": round(new_y, 2)
         }
         
         # Add mode-specific data
@@ -547,6 +601,7 @@ class MultiModeDataPublisher:
         """Handle Ctrl+C gracefully."""
         print(f"\n🛑 Stopping data collection...")
         self.running = False
+        
         self._save_session_data()
         
         total_points = sum(len(data) for data in self.player_data.values())

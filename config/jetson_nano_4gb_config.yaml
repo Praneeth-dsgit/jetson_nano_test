@@ -1,42 +1,42 @@
-# Jetson Nano 4GB Optimized Configuration
-# This configuration is specifically tuned for Jetson Nano 4GB hardware
-# This is the main configuration file for Jetson Nano 4GB optimized performance
+# Jetson Orin 32GB Optimized Configuration
+# This configuration is specifically tuned for Jetson Orin 32GB hardware
+# This is the main configuration file for Jetson Orin 32GB optimized performance
 
 paths:
-  data_root: 'athlete_training_data'
-  game_data_root: 'athlete_game_data'
-  prediction_outputs: 'prediction_outputs'
-  models_root: 'athlete_models_pkl'
-  hb_tensors_updated: 'athlete_models_tensors_updated'
-  hb_tensors_previous: 'athlete_models_tensors_previous'
+  data_root: '../data/athlete_training_data'
+  game_data_root: '../data/athlete_game_data'
+  prediction_outputs: '../data/prediction_outputs'
+  models_root: '../models/athlete_models_pkl'
+  hb_tensors_updated: '../models/athlete_models_tensors_updated'
+  hb_tensors_previous: '../models/athlete_models_tensors_previous'
   data_file_pattern: '*.csv'
   model_path: 'rf_model.pkl'
   hb_path: 'hb_rf_model.zip'
   onnx_path: 'rf_model.onnx'
 
-# Jetson Nano 4GB Optimized Training Parameters
+# Jetson Orin 32GB Optimized Training Parameters
 training:
-  n_estimators: 60             # Reduced for faster training (was 100)
-  max_depth: 6                 # Reduced complexity for memory efficiency
-  min_samples_split: 8         # Increased for simpler trees
+  n_estimators: 120            # Optimized for Orin - better model quality
+  max_depth: 10                # Deeper trees for better accuracy
+  min_samples_split: 8         # Balanced for model quality
   min_samples_leaf: 15         # Increased for better generalization
   random_state: 42
-  n_jobs: 2                    # Use 2 cores, leave 2 for system
-  sessions_to_use: 2           # Use 2 sessions instead of 3 (less memory)
-  min_sessions_required: 2     # Reduced minimum requirement
+  n_jobs: 10                   # Use 10 cores on Orin (12 cores available)
+  sessions_to_use: 4           # Use more sessions for better training on Orin
+  min_sessions_required: 2     # Minimum requirement
 
 monitoring:
   poll_interval_secs: 15       # Slightly longer interval to reduce overhead
   debounce_secs: 5             # Longer debounce for stability
   auto_update_enabled: true
 
-# Jetson Nano 4GB Hardware Optimizations
+# Jetson Orin 32GB Hardware Optimizations
 jetson:
   device_detection: true
-  memory_limit_mb: 1800        # Conservative limit for 4GB system
-  batch_size: 400              # Smaller batches for memory efficiency
+  memory_limit_mb: 24000       # Optimized for 32GB system (leave 8GB for system)
+  batch_size: 1500             # Larger batches for better GPU utilization
   use_mixed_precision: true    # Enable for memory savings
-  gpu_memory_fraction: 0.5     # Conservative GPU memory usage
+  gpu_memory_fraction: 0.80    # Optimized GPU memory usage for Orin
 
 backup:
   enabled: true
@@ -47,6 +47,10 @@ retraining:
   accuracy_threshold: 0.80     # Slightly lower threshold for embedded performance
   min_samples_threshold: 300   # Reduced threshold
   force_retrain_on_new_data: true
+  # Model validation thresholds
+  min_r2_threshold: 0.3        # Minimum R² score for model acceptance
+  max_rmse_threshold: 50.0     # Maximum RMSE for model acceptance
+  min_cv_score: -100.0         # Minimum cross-validation score
 
 logging:
   level: 'INFO'
@@ -54,18 +58,18 @@ logging:
   log_file: 'jetson_training.log'
   console_output: true
   detailed_progress: true      # Enable detailed logging for metrics display
-  logs_dir: './logs'
+  logs_dir: '../monitoring/logs'
 
 # Memory-Efficient Feature Engineering
 feature_engineering:
   enabled: true
-  rolling_window: 8            # Smaller window for memory efficiency
+  rolling_window: 15           # Larger window for better features on Orin
   sampling_frequency: 10       # Keep 10Hz sampling
   features:
     resultant: true
     rolling_stats: true
     jerk: true
-    fft_features: false        # Disable FFT for memory savings (optional)
+    fft_features: true         # Enable FFT features for better accuracy on Orin
     acc_components: ['acc_x', 'acc_y', 'acc_z']
 
 # Prediction Conflict Prevention (unchanged)
@@ -79,26 +83,26 @@ prediction_check:
   max_wait_time_secs: 300
   force_training: false
 
-# Jetson Nano Performance Monitoring
+# Jetson Orin Performance Monitoring
 performance:
   enable_temperature_monitoring: true
   temperature_warning_threshold: 70    # Celsius
   temperature_critical_threshold: 80   # Celsius
-  memory_warning_threshold: 85         # Percentage
+  memory_warning_threshold: 90         # Percentage (higher threshold with more memory)
   auto_performance_mode: true          # Enable nvpmodel -m 0 equivalent
 
 # Dynamic Model Loading Configuration
-# Optimized for Jetson Nano 4GB memory constraints
+# Optimized for Jetson Orin 32GB memory capabilities
 model_loading:
   # Directory containing model files
-  models_directory: 'athlete_models_tensors_updated'
+  models_directory: '../models/athlete_models_tensors_updated'
   
   # Maximum number of models to keep in memory (LRU cache)
-  # Optimized for 4GB Jetson Nano - smaller cache to save memory
-  cache_size: 3
+  # Optimized for 32GB Jetson Orin - larger cache for better performance
+  cache_size: 18
   
   # Target device for model inference
-  # Using CUDA for GPU acceleration on Jetson Nano 4GB
+  # Using CUDA for GPU acceleration on Jetson Orin 32GB
   device: 'cuda'
   
   # Enable memory monitoring and logging
@@ -108,24 +112,24 @@ model_loading:
   # Set to null or empty list to disable preloading
   preload_players: null  # Example: [1, 2, 3]
 
-# Memory Optimization Settings (Jetson Nano 4GB specific)
+# Memory Optimization Settings (Jetson Orin 32GB optimized)
 memory_optimization:
-  # Maximum memory usage threshold (MB) - conservative for 4GB system
-  max_memory_mb: 1200
+  # Maximum memory usage threshold (MB) - optimized for 32GB system
+  max_memory_mb: 24000
   
   # Memory check interval (seconds)
   memory_check_interval: 30
   
   # Enable automatic cache clearing when memory is low
-  auto_clear_on_low_memory: true
+  auto_clear_on_low_memory: false  # Less aggressive with more memory available
 
-# Performance Settings (Jetson Nano 4GB optimized)
+# Performance Settings (Jetson Orin 32GB optimized)
 model_performance:
   # Enable model preloading for better performance
-  enable_preloading: false  # Disabled to save memory
+  enable_preloading: true  # Enabled for better performance on Orin
   
   # Maximum number of models to preload concurrently
-  max_concurrent_preload: 2  # Reduced for 4GB system
+  max_concurrent_preload: 6  # Optimized for 32GB system
   
   # Enable model warming (test prediction on load)
   enable_model_warming: true
@@ -142,31 +146,31 @@ model_logging:
   # Log memory usage every N model loads
   memory_log_interval: 10
 
-# Jetson Nano 4GB Specific Model Loading Optimizations
+# Jetson Orin 32GB Specific Model Loading Optimizations
 jetson_model_optimization:
   # Enable Jetson-specific optimizations
   enabled: true
   
-  # Reduce cache size for Jetson Nano 4GB
-  jetson_nano_cache_size: 3
+  # Optimized cache size for Jetson Orin 32GB
+  jetson_orin_cache_size: 18
   
-  # Enable CUDA mode on Jetson Nano 4GB for GPU acceleration
+  # Enable CUDA mode on Jetson Orin 32GB for GPU acceleration
   force_cpu_on_jetson: false
   
   # Enable memory pressure monitoring
   enable_memory_pressure_monitoring: true
   
-  # Conservative memory limits for 4GB system
-  max_model_memory_mb: 200  # Per model memory limit
-  total_model_memory_mb: 600  # Total memory for all models
+  # Optimized memory limits for 32GB system
+  max_model_memory_mb: 500  # Per model memory limit
+  total_model_memory_mb: 18000  # Total memory for all models
 
 # Environment Variables (can be overridden)
 environment:
   # Override cache size via environment variable
-  MODEL_CACHE_SIZE: 3  # Optimized for 4GB Jetson Nano
+  MODEL_CACHE_SIZE: 18  # Optimized for 32GB Jetson Orin
   
   # Override device via environment variable
-  MODEL_DEVICE: 'cuda'  # Use CUDA on Jetson Nano 4GB
+  MODEL_DEVICE: 'cuda'  # Use CUDA on Jetson Orin 32GB
   
   # Override models directory via environment variable
   MODEL_DIRECTORY: 'athlete_models_tensors_updated'
