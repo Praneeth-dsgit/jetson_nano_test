@@ -52,6 +52,12 @@ Thumbs.db
 # Log files
 *.log
 logs/
+monitoring/logs/
+
+# Database files (runtime data, should not be committed)
+*.db
+*.sqlite
+*.sqlite3
 
 # Lock files
 .prediction_running.lock
@@ -60,13 +66,25 @@ logs/
 athlete_models_pkl/
 athlete_models_tensors_updated/
 athlete_models_tensors_previous/
+models/athlete_models_pkl/
+models/athlete_models_tensors_updated/
+models/athlete_models_tensors_previous/
 
 # Training data (too large for Git)
 athlete_training_data/
 athlete_game_data/
+data/athlete_training_data/
+data/athlete_game_data/
 
 # Prediction outputs (generated files)
 prediction_outputs/
+data/prediction_outputs/
+
+# Visualization outputs (generated images)
+*.png
+*.jpg
+*.jpeg
+visualization/player_heatmaps/
 
 # Temporary files
 *.tmp
@@ -78,8 +96,15 @@ prediction_outputs/
 # pytest
 .pytest_cache/
 .coverage
+htmlcov/
+.tox/
 
 # mypy
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# OS specific
+*.bak
+*.swp
+*~
