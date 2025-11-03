@@ -71,10 +71,10 @@ class DatabaseConnectionPool:
         """Create a new database connection."""
         try:
             connection = pymysql.connect(
-                host=os.getenv("DB_HOST", ''),
-                user=os.getenv("DB_USER", ''),
-                password=os.getenv("DB_PASSWORD", ''),
-                database=os.getenv("DB_NAME", ''),
+                host=os.getenv("DB_HOST", 'acufore22-desktop'),
+                user=os.getenv("DB_USER", 'Praneeth'),
+                password=os.getenv("DB_PASSWORD", 'playerstat'),
+                database=os.getenv("DB_NAME", 'dashboard_db'),
                 cursorclass=DictCursor,
                 charset='utf8mb4',
                 connect_timeout=self.connection_timeout,
