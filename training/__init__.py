@@ -6,7 +6,7 @@ This package contains machine learning training and model versioning:
 - model_version_manager: Model versioning, backup, and rollback
 """
 
-from .sup_ml_rf_training import *
+# Import ModelVersionManager directly to avoid circular imports
 from .model_version_manager import ModelVersionManager
 
 __version__ = "1.0.0"
@@ -14,3 +14,6 @@ __version__ = "1.0.0"
 __all__ = [
     'ModelVersionManager'
 ]
+
+# Note: sup_ml_rf_training is not imported here to avoid circular import issues
+# when the script is run directly. Import it explicitly when needed.

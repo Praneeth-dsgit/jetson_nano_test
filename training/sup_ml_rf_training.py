@@ -24,8 +24,15 @@ except ImportError:
     # Fall back to absolute imports (when run directly)
     import sys
     import os
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from training.model_version_manager import ModelVersionManager
+    # Add project root to path
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    try:
+        from training.model_version_manager import ModelVersionManager
+    except ImportError:
+        # Last resort: try importing directly from the same directory
+        from model_version_manager import ModelVersionManager
 import signal
 import sys
 
@@ -34,20 +41,47 @@ import sys
 # -----------------------------
 def load_config(config_path: str = "../config/jetson_orin_32gb_config.yaml") -> Dict[str, Any]:
     """Load configuration from YAML file."""
+    import os
+    
+    # Get project root directory (parent of training/)
+    script_dir = os.path.dirname(os.path.abspath(__file__))  # training/
+    project_root = os.path.dirname(script_dir)  # project root
+    
+    # Resolve config path to absolute
+    if not os.path.isabs(config_path):
+        # If path starts with ../ it's relative to project root
+        if config_path.startswith('../'):
+            # Remove the ../ prefix and join with project root
+            config_path = os.path.join(project_root, config_path[3:])
+        else:
+            # Relative to current directory or project root
+            config_path = os.path.abspath(os.path.join(project_root, config_path))
+    config_path = os.path.abspath(config_path)
+    
+    # Try to load from resolved path
     try:
-        with open(config_path, 'r') as file:
-            config = yaml.safe_load(file)
-    except FileNotFoundError:
-        # Fall back to absolute path (when run directly)
-        import os
-        abs_config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'config', 'jetson_orin_32gb_config.yaml')
-        try:
-            with open(abs_config_path, 'r') as file:
+        if os.path.exists(config_path):
+            with open(config_path, 'r') as file:
                 config = yaml.safe_load(file)
-            print(f"[INFO] Loaded configuration from {abs_config_path}")
-            return config
-        except FileNotFoundError:
-            print(f"[WARN] Config file not found, using default values")
+                if config is None:
+                    print(f"[WARN] Config file is empty or invalid: {config_path}, using default values")
+                    return get_default_config()
+                print(f"[INFO] Loaded configuration from {config_path}")
+                return config
+        else:
+            print(f"[WARN] Config file not found at {config_path}")
+            # Try alternative: direct path from project root
+            alt_config_path = os.path.join(project_root, 'config', 'jetson_orin_32gb_config.yaml')
+            if os.path.exists(alt_config_path):
+                print(f"[INFO] Found config at alternative location: {alt_config_path}")
+                with open(alt_config_path, 'r') as file:
+                    config = yaml.safe_load(file)
+                    if config is None:
+                        print(f"[WARN] Config file is empty or invalid: {alt_config_path}, using default values")
+                        return get_default_config()
+                    print(f"[INFO] Loaded configuration from {alt_config_path}")
+                    return config
+            print(f"[WARN] Using default configuration values")
             return get_default_config()
     except Exception as e:
         print(f"[ERROR] Failed to load config: {e}, using default values")
@@ -129,6 +163,22 @@ def get_default_config() -> Dict[str, Any]:
 
 # Load configuration
 CONFIG = load_config()
+
+# Ensure CONFIG is not None (safety check)
+if CONFIG is None:
+    print("[ERROR] Failed to load configuration. Using default values.")
+    CONFIG = get_default_config()
+
+# Verify essential config sections exist
+if 'paths' not in CONFIG:
+    print("[WARN] 'paths' section missing from config, adding defaults")
+    CONFIG['paths'] = get_default_config()['paths']
+if 'monitoring' not in CONFIG:
+    print("[WARN] 'monitoring' section missing from config, adding defaults")
+    CONFIG['monitoring'] = get_default_config()['monitoring']
+if 'training' not in CONFIG:
+    print("[WARN] 'training' section missing from config, adding defaults")
+    CONFIG['training'] = get_default_config()['training']
 
 # -----------------------------
 # Prediction Running Check Functions
