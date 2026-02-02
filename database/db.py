@@ -71,7 +71,7 @@ class DatabaseConnectionPool:
         """Create a new database connection."""
         try:
             connection = pymysql.connect(
-                host=os.getenv("DB_HOST", 'acufore22-desktop'),
+                host=os.getenv("DB_HOST", 'playerstat-ai'),
                 user=os.getenv("DB_USER", 'Praneeth'),
                 password=os.getenv("DB_PASSWORD", 'playerstat'),
                 database=os.getenv("DB_NAME", 'dashboard_db'),
@@ -481,13 +481,21 @@ class Database:
     
     def close(self):
         """Close database connections."""
-        if self.use_pool and self.pool:
-            self.pool.close_all_connections()
-        elif self.connection and self.connection.open:
-            self.connection.close()
+        try:
+            if self.use_pool and hasattr(self, 'pool') and self.pool:
+                self.pool.close_all_connections()
+            elif hasattr(self, 'connection') and self.connection and self.connection.open:
+                self.connection.close()
+        except Exception:
+            # Silently ignore errors during cleanup
+            pass
 
     def __del__(self):
-        self.close()
+        try:
+            self.close()
+        except Exception:
+            # Silently ignore errors during destruction
+            pass
 
 def get_athlete_profile(athlete_id=None):
     """

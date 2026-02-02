@@ -117,38 +117,29 @@ def _update_log_filename_if_needed(mode: str) -> None:
         logger.info(f"Log file created with mode: {log_filename}")
         logger.info(f"Mode detected: {mode.upper()}")
 
-def _normalize_device_id(raw_device_id: str) -> str:
-    """Normalize device ID to PM### format."""
-    raw_str = str(raw_device_id).strip() if raw_device_id is not None else ""
-    if not raw_str:
-        return "PM000"
-
-    match = re.search(r'(\d+)', raw_str)
-    if match:
-        return f"PM{int(match.group(1)):03d}"
-
-    return "PM000"
-
 def _init_device_context(device_id_str: str) -> Dict[str, Any]:
     """Create and return a fresh processing context for a device."""
-    normalized_device_id = _normalize_device_id(device_id_str)
     # Extract numeric part from device_id (handles both "001" and "PM001" formats)
     device_id_int = None
     try:
-        device_id_int = int(normalized_device_id[2:])
+        # Try direct conversion first (for "001" format)
+        device_id_int = int(device_id_str)
     except ValueError:
-        device_id_int = None
+        # Try extracting numeric part (for "PM001" format)
+        match = re.search(r'(\d+)', device_id_str)
+        if match:
+            device_id_int = int(match.group(1))
     
     # Initialize athlete profile without DB; use sensible defaults
     athlete_id_val = device_id_int if device_id_int is not None else 0
-    name_val = f"Device_{normalized_device_id}"
+    name_val = f"Device_{device_id_str}"
     age_val = 25
     weight_val = 70.0
     height_val = 175.0
     gender_val = 1
 
     context = {
-        "device_id": normalized_device_id,
+        "device_id": device_id_str,
         "athlete_id": athlete_id_val,
         "name": name_val,
         "age": age_val,
@@ -157,7 +148,7 @@ def _init_device_context(device_id_str: str) -> Dict[str, Any]:
         "gender": gender_val,
         "hr_rest": 60,
         "hr_max": 220 - age_val,
-        "MQTT_PUBLISH_TOPIC": f"predictions/{normalized_device_id}",
+        "MQTT_PUBLISH_TOPIC": f"{device_id_str}/predictions",
         # Filters and state
         "madgwick_quaternion": np.array([1.0, 0.0, 0.0, 0.0]),
         "hr_buffer": deque(maxlen=ROLLING_WINDOW_SIZE),
@@ -185,14 +176,14 @@ def _init_device_context(device_id_str: str) -> Dict[str, Any]:
         "total_trimp": 0.0,
     }
 
-    device_contexts[normalized_device_id] = context
+    device_contexts[device_id_str] = context
 
     # Ensure a logger exists; set up per first device
     global logger
     try:
         _ = logger  # type: ignore[name-defined]
     except NameError:
-        logger = setup_logging(athlete_id_val, normalized_device_id)
+        logger = setup_logging(athlete_id_val, device_id_str)
     return context
 
 def _load_context_to_globals(ctx: Dict[str, Any]) -> None:
@@ -214,7 +205,7 @@ def _load_context_to_globals(ctx: Dict[str, Any]) -> None:
     gender = ctx.get("gender", 1)
     hr_rest = ctx.get("hr_rest", 60)
     hr_max = ctx.get("hr_max", 195)
-    MQTT_PUBLISH_TOPIC = ctx.get("MQTT_PUBLISH_TOPIC", "predictions/000")
+    MQTT_PUBLISH_TOPIC = ctx.get("MQTT_PUBLISH_TOPIC", "000/predictions")
 
     quaternion = ctx.get("madgwick_quaternion", np.array([1.0, 0.0, 0.0, 0.0]))
     hr_buffer = ctx.get("hr_buffer", deque(maxlen=ROLLING_WINDOW_SIZE))
@@ -491,273 +482,128 @@ def remove_prediction_lockfile() -> None:
 
 DEVICE = get_device()
 
-# Lazy initialization variables - will be initialized on first use
-model_loader = None
-quality_assessor = None
-message_queue = None
-health_monitor = None
+# Initialize dynamic model loader instead of loading all models at startup
+print("Initializing dynamic model loader...")
+logger.info("Initializing dynamic model loader for memory-efficient model management")
 
-# Configuration variables (will be set during initialization)
-CACHE_SIZE = None
-MODEL_DEVICE = None
-MODELS_DIR = None
+# Create dynamic model loader with Jetson Orin 32GB optimized settings
+# Read configuration from jetson_orin_32gb_config.yaml
+CACHE_SIZE = int(os.getenv("MODEL_CACHE_SIZE", str(config.get('model_loading', {}).get('cache_size', 3))))
+MODEL_DEVICE = os.getenv("MODEL_DEVICE", config.get('model_loading', {}).get('device', 'cpu'))
+# Handle models directory path for new folder structure
+try:
+    # Try relative path first (when run as module)
+    MODELS_DIR = os.getenv("MODEL_DIRECTORY", config.get('model_loading', {}).get('models_directory', '../models/athlete_models_tensors_updated'))
+except:
+    # Fall back to absolute path (when run directly)
+    import os
+    MODELS_DIR = os.getenv("MODEL_DIRECTORY", config.get('model_loading', {}).get('models_directory', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'athlete_models_tensors_updated')))
+ENABLE_MONITORING = config.get('model_loading', {}).get('enable_memory_monitoring', True)
 
-def _initialize_components():
-    """Initialize all components lazily (only when needed)."""
-    global model_loader, quality_assessor, message_queue, health_monitor
-    global CACHE_SIZE, MODEL_DEVICE, MODELS_DIR
-    
-    # Only initialize if not already initialized
-    if model_loader is not None:
-        return
-    
-    # Initialize dynamic model loader instead of loading all models at startup
-    print("Initializing dynamic model loader...")
-    logger.info("Initializing dynamic model loader for memory-efficient model management")
+model_loader = DynamicModelLoader(
+    models_dir=MODELS_DIR,
+    cache_size=CACHE_SIZE,
+    device=MODEL_DEVICE,
+    enable_memory_monitoring=ENABLE_MONITORING
+)
 
-    # Create dynamic model loader with Jetson Orin 32GB optimized settings
-    # Read configuration from jetson_orin_32gb_config.yaml
-    CACHE_SIZE = int(os.getenv("MODEL_CACHE_SIZE", str(config.get('model_loading', {}).get('cache_size', 3))))
-    MODEL_DEVICE = os.getenv("MODEL_DEVICE", config.get('model_loading', {}).get('device', 'cpu'))
-    # Handle models directory path for new folder structure
-    try:
-        # Try relative path first (when run as module)
-        MODELS_DIR = os.getenv("MODEL_DIRECTORY", config.get('model_loading', {}).get('models_directory', '../models/athlete_models_tensors_updated'))
-    except:
-        # Fall back to absolute path (when run directly)
-        # os is already imported at module level, no need to import again
-        MODELS_DIR = os.getenv("MODEL_DIRECTORY", config.get('model_loading', {}).get('models_directory', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'athlete_models_tensors_updated')))
-    ENABLE_MONITORING = config.get('model_loading', {}).get('enable_memory_monitoring', True)
+# Initialize data quality assessor
+print("Initializing data quality assessor...")
+logger.info("Initializing data quality assessor for sensor data reliability monitoring")
 
-    model_loader = DynamicModelLoader(
-        models_dir=MODELS_DIR,
-        cache_size=CACHE_SIZE,
-        device=MODEL_DEVICE,
-        enable_memory_monitoring=ENABLE_MONITORING
-    )
+quality_assessor = SensorDataQualityAssessor(
+    window_size=30,
+    enable_logging=True,
+    quality_threshold=0.7
+)
 
-    # Initialize data quality assessor
-    print("Initializing data quality assessor...")
-    logger.info("Initializing data quality assessor for sensor data reliability monitoring")
+# Initialize MQTT message queue for reliable delivery
+print("Initializing MQTT message queue...")
+logger.info("Initializing MQTT message queue for reliable message delivery")
 
-    quality_assessor = SensorDataQualityAssessor(
-        window_size=30,
-        enable_logging=True,
-        quality_threshold=0.7
-    )
+message_queue = MQTTMessageQueue(
+    db_path="mqtt_message_queue.db",
+    max_retries=5,
+    enable_logging=True
+)
 
-    # Initialize MQTT message queue for reliable delivery
-    print("Initializing MQTT message queue...")
-    logger.info("Initializing MQTT message queue for reliable message delivery")
+# Initialize system health monitor
+print("Initializing system health monitor...")
+logger.info("Initializing system health monitor for comprehensive system monitoring")
 
-    message_queue = MQTTMessageQueue(
-        db_path="mqtt_message_queue.db",
-        max_retries=5,
-        enable_logging=True
-    )
+health_monitor = SystemHealthMonitor(
+    db_path="system_health.db",
+    collection_interval=60,  # Collect metrics every minute
+    history_retention_days=7,  # Keep 7 days of history
+    enable_logging=True
+)
 
-# Initialize components immediately when run directly, lazily when imported
-if __name__ == "__main__":
-    _initialize_components()
-    _initialize_health_monitor()
-
-# Global variable to track if publish client is initialized
-_publish_client_initialized = False
-client = None  # Global MQTT client for fallback publishing
-
-def _initialize_publish_client():
+# Add alert callback for health monitoring
+def health_alert_callback(alert: Any) -> None:
     """
-    Initialize MQTT publish client for publishing predictions.
-    This function is called at module level to ensure the client is available
-    when main.py is imported (e.g., by subscriber.py).
+    Callback function for system health alerts.
+    
+    Args:
+        alert: HealthAlert object from SystemHealthMonitor
     """
-    global _publish_client_initialized, client
-    
-    # Only initialize once
-    if _publish_client_initialized:
-        return
-    
-    try:
-        # Log the broker configuration being used
-        broker_from_env = os.getenv("MQTT_PUBLISH_BROKER")
-        logger.info(f"🔌 Initializing PUBLISH MQTT client")
-        logger.info(f"   Broker from env: {broker_from_env}")
-        logger.info(f"   Broker being used: {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}")
-        
-        # Create PUBLISH client for network broker (publishing predictions)
-        publish_client = mqtt.Client()
-        publish_client.on_connect = on_connect_publish
-        publish_client.on_disconnect = on_disconnect_publish
-        
-        # Add error callback for better diagnostics
-        def on_publish_error(client, userdata, error):
-            logger.error(f"❌ PUBLISH client error: {error}")
-        publish_client.on_socket_open = lambda client, userdata, sock: logger.debug("PUBLISH socket opened")
-        publish_client.on_socket_close = lambda client, userdata, sock: logger.warning("PUBLISH socket closed")
-        
-        # Try to connect
-        try:
-            logger.info(f"   Attempting to connect to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}...")
-            result = publish_client.connect(MQTT_PUBLISH_BROKER, MQTT_PUBLISH_PORT, 60)
-            if result == mqtt.MQTT_ERR_SUCCESS:
-                logger.info("✅ PUBLISH client connection initiated (will connect asynchronously)")
-            else:
-                logger.warning(f"⚠️  PUBLISH client connect() returned code: {result}")
-                logger.warning(f"   Error codes: 0=Success, 1=Connection refused, 2=Identifier rejected, 3=Server unavailable, 4=Bad credentials, 5=Not authorized")
-            publish_client.loop_start()
-            
-            # Wait longer for connection to establish (async connection)
-            time.sleep(2)
-            if publish_client.is_connected():
-                logger.info("✅ PUBLISH client is connected")
-            else:
-                logger.warning(f"⚠️  PUBLISH client not yet connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}")
-                logger.warning("   This is normal - connection happens asynchronously. Messages will be queued until connection is established.")
-                logger.warning(f"   Verify broker is running: Test-NetConnection -ComputerName {MQTT_PUBLISH_BROKER} -Port {MQTT_PUBLISH_PORT}")
-        except Exception as e:
-            logger.error(f"❌ Failed to connect to PUBLISH MQTT broker ({MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}): {e}")
-            logger.error(f"   Error type: {type(e).__name__}")
-            import traceback
-            logger.debug(f"   Traceback: {traceback.format_exc()}")
-            logger.warning("⚠️  Predictions will be queued and published when broker becomes available")
-            # Still start the loop - it will retry connection
-            publish_client.loop_start()
-        
-        # Store publish_client globally for fallback publishing
-        client = publish_client
-        
-        # Set the client in message queue immediately (will be updated when connected)
-        # This allows the queue to start processing once connection is established
-        # Make sure message_queue is initialized first
-        if message_queue is None:
-            logger.warning("⚠️  Message queue not initialized yet, initializing components...")
-            _initialize_components()
-        
-        if message_queue is not None:
-            message_queue.set_mqtt_client(publish_client)
-            logger.info("✅ Message queue configured with publish client")
-            
-            # Check connection status after a moment
-            time.sleep(1)
-            if publish_client.is_connected():
-                logger.info("✅ PUBLISH client is connected - ready to publish")
-            else:
-                logger.warning(f"⚠️  PUBLISH client not yet connected - messages will be queued")
-                logger.warning(f"   Connection will be established asynchronously")
-                logger.warning(f"   Check broker accessibility: {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}")
-        else:
-            logger.error("❌ Message queue is still None after initialization attempt")
-        
-        _publish_client_initialized = True
-        
-        logger.info(f"✅ PUBLISH client initialized (broker: {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT})")
-        logger.info(f"   Connection status will be updated when broker connects")
-        
-    except Exception as e:
-        logger.error(f"❌ Error initializing PUBLISH client: {e}")
-        logger.warning("⚠️  Predictions will be queued but may not be published until client is initialized")
+    logger.warning(f"System Health Alert: {alert.message}")
+    print(f"🚨 System Alert: {alert.message}")
 
-# Initialize publish client only when main.py is run directly, not when imported
-# This allows subscriber.py to import process_raw_sensor_data without initializing MQTT clients
-if __name__ == "__main__":
-    _initialize_publish_client()
-else:
-    # When imported, initialize lazily (only when process_raw_sensor_data is called)
-    # This allows subscriber.py to run independently
-    _publish_client_initialized = False
+health_monitor.add_alert_callback(health_alert_callback)
 
-def _initialize_health_monitor():
-    """Initialize health monitor lazily."""
-    global health_monitor
-    
-    if health_monitor is not None:
-        return
-    
-    # Initialize system health monitor
-    print("Initializing system health monitor...")
-    logger.info("Initializing system health monitor for comprehensive system monitoring")
-    
-    health_monitor = SystemHealthMonitor(
-        db_path="system_health.db",
-        collection_interval=60,  # Collect metrics every minute
-        history_retention_days=7,  # Keep 7 days of history
-        enable_logging=True
-    )
+# Start system health monitoring
+health_monitor.start_monitoring()
+logger.info("System health monitoring started")
 
-    # Add alert callback for health monitoring
-    def health_alert_callback(alert: Any) -> None:
-        """
-        Callback function for system health alerts.
-        
-        Args:
-            alert: HealthAlert object from SystemHealthMonitor
-        """
-        logger.warning(f"System Health Alert: {alert.message}")
-        print(f"🚨 System Alert: {alert.message}")
+# Get available models info
+available_models = model_loader.get_available_player_ids()
+max_available_models = len(available_models)
 
-    health_monitor.add_alert_callback(health_alert_callback)
+print(f"Dynamic model loader initialized (Jetson Nano 4GB optimized)")
+print(f"   📁 Models directory: {MODELS_DIR}/")
+print(f"   💾 Cache size: {CACHE_SIZE} models (optimized for 4GB RAM)")
+print(f"   Device: {MODEL_DEVICE} (GPU acceleration enabled)")
+print(f"   Available models: {max_available_models}")
+print(f"   🎮 Available player IDs: {available_models}")
+print(f"   🔧 Memory monitoring: {'Enabled' if ENABLE_MONITORING else 'Disabled'}")
 
-    # Start system health monitoring
-    health_monitor.start_monitoring()
-    logger.info("System health monitoring started")
+logger.info(f"Dynamic Model Loader: Initialized with Jetson Nano 4GB optimized settings")
+logger.info(f"Dynamic Model Loader: Cache size {CACHE_SIZE}, Device {MODEL_DEVICE}")
+logger.info(f"Dynamic Model Loader: Found {max_available_models} available models")
+logger.info(f"Dynamic Model Loader: Available player IDs: {available_models}")
 
-# Initialize health monitor immediately when run directly, lazily when imported
-if __name__ == "__main__":
-    _initialize_components()
-    _initialize_health_monitor()
-    
-    # Get available models info (only when run directly)
-    available_models = model_loader.get_available_player_ids()
-    max_available_models = len(available_models)
-    
-    # Get MODELS_DIR for display
-    try:
-        MODELS_DIR = os.getenv("MODEL_DIRECTORY", config.get('model_loading', {}).get('models_directory', '../models/athlete_models_tensors_updated'))
-    except:
-        MODELS_DIR = os.getenv("MODEL_DIRECTORY", config.get('model_loading', {}).get('models_directory', os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'athlete_models_tensors_updated')))
-    
-    print(f"Dynamic model loader initialized (Jetson Nano 4GB optimized)")
-    print(f"   📁 Models directory: {MODELS_DIR}/")
-else:
-    # When imported, set defaults (will be initialized lazily)
-    available_models = []
-    max_available_models = 0
-    # Don't print startup messages when imported
+print(f"Models will be loaded on-demand based on player/device IDs")
+print(f"Memory usage will be optimized with LRU cache eviction")
+logger.info("Dynamic model loading system ready - models will be loaded on-demand")
 
-    # =============================================================================
-    # STARTUP STATUS SUMMARY
-    # =============================================================================
-    print(f"\n{'='*60}")
-    print(f"JETSON NANO ML PREDICTION ENGINE - STARTUP COMPLETE")
-    print(f"{'='*60}")
-    print(f"System Configuration:")
-    print(f"   - Mode: Dynamic Model Loading (Memory Optimized)")
-    if CACHE_SIZE is not None:
-        print(f"   - Cache Size: {CACHE_SIZE} models (LRU eviction)")
-    if MODEL_DEVICE is not None:
-        print(f"   - Device: {MODEL_DEVICE} (GPU acceleration enabled)")
-    print(f"   - Available Models: {max_available_models} players")
-    try:
-        ENABLE_MONITORING = config.get('model_loading', {}).get('enable_memory_monitoring', True)
-        print(f"   - Memory Monitoring: {'Enabled' if ENABLE_MONITORING else 'Disabled'}")
-    except:
-        pass
-    print(f"   - Health Metrics: Every 10 predictions")
-    print(f"   - Technical Reports: Every 100 predictions")
-    print(f"")
-    print(f"Ready for:")
-    print(f"   - Multi-device predictions (1-{max_available_models} players)")
-    print(f"   - Training mode (actual HR from sensors)")
-    print(f"   - Game mode (ML predictions)")
-    print(f"   - Real-time MQTT data processing")
-    print(f"")
-    print(f"Display Strategy:")
-    print(f"   - Health metrics: Every 10 predictions (HR, HRV, Stress, Recovery)")
-    print(f"   - Technical info: Every 100 predictions (Memory, Cache)")
-    print(f"   - Errors/warnings: Always logged to file")
-    print(f"{'='*60}")
-    print(f"Waiting for MQTT data...")
-    print(f"{'='*60}\n")
+# =============================================================================
+# STARTUP STATUS SUMMARY
+# =============================================================================
+print(f"\n{'='*60}")
+print(f"JETSON NANO ML PREDICTION ENGINE - STARTUP COMPLETE")
+print(f"{'='*60}")
+print(f"System Configuration:")
+print(f"   - Mode: Dynamic Model Loading (Memory Optimized)")
+print(f"   - Cache Size: {CACHE_SIZE} models (LRU eviction)")
+print(f"   - Device: {MODEL_DEVICE} (GPU acceleration enabled)")
+print(f"   - Available Models: {max_available_models} players")
+print(f"   - Memory Monitoring: {'Enabled' if ENABLE_MONITORING else 'Disabled'}")
+print(f"   - Health Metrics: Every 10 predictions")
+print(f"   - Technical Reports: Every 100 predictions")
+print(f"")
+print(f"Ready for:")
+print(f"   - Multi-device predictions (1-{max_available_models} players)")
+print(f"   - Training mode (actual HR from sensors)")
+print(f"   - Game mode (ML predictions)")
+print(f"   - Real-time MQTT data processing")
+print(f"")
+print(f"Display Strategy:")
+print(f"   - Health metrics: Every 10 predictions (HR, HRV, Stress, Recovery)")
+print(f"   - Technical info: Every 100 predictions (Memory, Cache)")
+print(f"   - Errors/warnings: Always logged to file")
+print(f"{'='*60}")
+print(f"Waiting for MQTT data...")
+print(f"{'='*60}\n")
 
 # =============================================================================
 # SYSTEM CONFIGURATION
@@ -1955,16 +1801,12 @@ def process_data() -> None:
         "g_impact_events": g_impact_events[-10:],       # Last 10 events for quick view
         "current_trimp": round(current_trimp, 2),
         "total_trimp": total_trimp,
-        #--"hr_rest": hr_rest,
-        #--"hr_max": hr_max,
-        "position": {
-            "x": latest_position["x"] if latest_position["x"] is not None else 0.0,
-            "y": latest_position["y"] if latest_position["y"] is not None else 0.0
-        },
+        "hr_rest": hr_rest,
+        "hr_max": hr_max,
         # Include engineered features snapshot for this window
-        #--"window_features": window_features if window_features is not None else {},
+        "window_features": window_features if window_features is not None else {},
         # Data quality assessment
-        #--"data_quality": quality_report if 'quality_report' in locals() else None,
+        "data_quality": quality_report if 'quality_report' in locals() else None,
         # Only include the prediction for this specific device's model (for game mode)
         "model_prediction": {
             "model_id": device_idx if mode == "game" else None,
@@ -1988,33 +1830,25 @@ def process_data() -> None:
         json.dump(output, f, indent=2)
 
     # MQTT publishing with reliable message queue
-    publish_topic = f"predictions/{_normalize_device_id(device_id)}"
     try:
         # Queue message for reliable delivery
         message_id = message_queue.queue_message(
-            topic=publish_topic,
+            topic=MQTT_PUBLISH_TOPIC,
             payload=json.dumps(output),
             qos=1,
             retain=False
         )
         
         if device_id not in prediction_logged_devices:
-            # Check connection status for logging
-            queue_client = message_queue.mqtt_client if hasattr(message_queue, 'mqtt_client') else None
-            is_connected = queue_client.is_connected() if queue_client else False
-            status = "✅ Connected" if is_connected else "⚠️ Queued (waiting for connection)"
-            logger.info(f"Queued prediction message {message_id} for reliable delivery to topic: {publish_topic} | Status: {status}")
+            logger.info(f"Queued prediction message {message_id} for reliable delivery to topic: {MQTT_PUBLISH_TOPIC}")
             prediction_logged_devices.add(device_id)
             
     except Exception as e:
         logger.error(f"Failed to queue MQTT message: {e}")
         # Fallback to direct publishing if queue fails
         try:
-            if client and hasattr(client, "is_connected") and client.is_connected():
-                client.publish(publish_topic, json.dumps(output), qos=1)
-                logger.warning("Used fallback direct MQTT publishing")
-            else:
-                logger.error("Fallback publish skipped: MQTT client not connected")
+            client.publish(MQTT_PUBLISH_TOPIC, json.dumps(output), qos=1)
+            logger.warning("Used fallback direct MQTT publishing")
         except Exception as fallback_e:
             logger.error(f"Fallback MQTT publishing also failed: {fallback_e}")
     
@@ -2119,7 +1953,7 @@ def on_connect_subscribe(client: mqtt.Client, userdata: Any, flags: Dict[str, An
         logger.error(f"Failed to connect to SUBSCRIBE MQTT Broker with result code: {rc}")
         mqtt_reconnect_attempts += 1
 
-def on_connect_publish(mqtt_client: mqtt.Client, userdata: Any, flags: Dict[str, Any], rc: int) -> None:
+def on_connect_publish(client: mqtt.Client, userdata: Any, flags: Dict[str, Any], rc: int) -> None:
     """
     MQTT connection callback handler for PUBLISH client (network broker).
     
@@ -2127,40 +1961,16 @@ def on_connect_publish(mqtt_client: mqtt.Client, userdata: Any, flags: Dict[str,
     Sets up message queue for publishing predictions.
     
     Args:
-        mqtt_client: MQTT client instance (publish client)
+        client: MQTT client instance (publish client)
         userdata: User-defined data (not used)
         flags: Connection flags dictionary
         rc: Result code (0 = success)
     """
-    global client
     if rc == 0:
         logger.info(f"✅ Connected to PUBLISH MQTT Broker ({MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}) with result code: {rc}")
-        # Set up message queue with publish client (ensure it's set even if already set)
-        message_queue.set_mqtt_client(mqtt_client)
-        # Update global client reference
-        client = mqtt_client
-        
-        # Check queue status
-        try:
-            queue_stats = message_queue.get_queue_stats()
-            pending = queue_stats.get('status_counts', {}).get('pending', 0)
-            sent = queue_stats.get('status_counts', {}).get('sent', 0)
-            if pending > 0:
-                logger.info(f"   {pending} queued messages will be published now")
-            if sent > 0:
-                logger.info(f"   {sent} messages already sent")
-        except Exception as e:
-            logger.debug(f"Could not get queue stats: {e}")
-        
+        # Set up message queue with publish client
+        message_queue.set_mqtt_client(client)
         logger.info("✅ MQTT message queue configured with publish client - messages will now be published")
-        
-        # Force immediate processing attempt
-        try:
-            # Trigger message processing by checking if there are pending messages
-            if hasattr(message_queue, '_process_batch'):
-                logger.debug("Triggering message queue processing")
-        except:
-            pass
     else:
         logger.error(f"❌ Failed to connect to PUBLISH MQTT Broker ({MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}) with result code: {rc}")
         logger.error(f"   Connection error codes: 1=Connection refused, 2=Identifier rejected, 3=Server unavailable, 4=Bad credentials, 5=Not authorized")
@@ -2263,7 +2073,9 @@ def on_message_subscribe(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessa
         if not device_id_str:
             # Unable to determine device id; skip
             return
-        device_id_str = _normalize_device_id(device_id_str)
+        # Only zfill if it's a pure numeric string (don't break "PM001" format)
+        if device_id_str.isdigit():
+            device_id_str = device_id_str.zfill(3)
         
         # Track unique MQTT topics
         unique_mqtt_topics.add(topic)
@@ -2304,7 +2116,7 @@ def on_message_subscribe(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessa
         # Only log device activity on first activation, not every message
         if device_id_str not in device_contexts:
             logger.info(f"Device {device_id_str} (Player {athlete_id}) - First activation, Mode: {mode}")
-            logger.info(f"Device {device_id_str} - MQTT prediction topic: predictions/{device_id_str}")
+            logger.info(f"Device {device_id_str} - MQTT prediction topic: {device_id_str}/predictions")
 
         # Get or init per-device context and sync into globals
         if device_id_str not in device_contexts:
@@ -2363,45 +2175,8 @@ def on_message_subscribe(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessa
         
         # Update last data time for this device
         ctx["last_data_time"] = time.time()
-        
-        # Extract and update position from parsed_data (x, y from LPS or publisher)
-        global latest_position
-        pos_x = parsed_data.get("x")
-        pos_y = parsed_data.get("y")
-        if pos_x is not None and pos_y is not None:
-            try:
-                latest_position["x"] = float(pos_x)
-                latest_position["y"] = float(pos_y)
-                # Debug: Log position updates for PM001
-                if athlete_id == "PM001":
-                    print(f"🔵 PM001 position updated in on_message_subscribe: ({latest_position['x']:.2f}, {latest_position['y']:.2f})")
-            except (ValueError, TypeError) as e:
-                print(f"⚠️  Error converting position for {athlete_id}: x={pos_x}, y={pos_y}, error={e}")
-        else:
-            # Debug: Log when position is not updated
-            if athlete_id == "PM001" and (pos_x is None or pos_y is None):
-                print(f"⚠️  PM001 position NOT updated in on_message_subscribe: x={pos_x}, y={pos_y} (from parsed_data)")
 
         # Convert publisher.py format to the expected format
-        # Handle magno as single value (from subscriber.py) or as dict with x, y, z (from publisher.py)
-        magno_value = parsed_data.get("magno")
-        if magno_value is not None:
-            if isinstance(magno_value, (int, float)):
-                # Single value from subscriber.py - use for all axes
-                magno_dict = {"x": magno_value, "y": magno_value, "z": magno_value}
-            elif isinstance(magno_value, dict):
-                # Dict format from publisher.py
-                magno_dict = magno_value
-            else:
-                magno_dict = {"x": 0, "y": 0, "z": 0}
-        else:
-            # Fallback to mag_x, mag_y, mag_z if magno not present
-            magno_dict = {
-                "x": parsed_data.get("mag_x", 0),
-                "y": parsed_data.get("mag_y", 0),
-                "z": parsed_data.get("mag_z", 0)
-            }
-        
         sensor_data = {
             "acc": {
                 "x": parsed_data.get("acc_x", 0),
@@ -2413,7 +2188,11 @@ def on_message_subscribe(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessa
                 "y": parsed_data.get("gyro_y", 0),
                 "z": parsed_data.get("gyro_z", 0)
             },
-            "magno": magno_dict,
+            "magno": {
+                "x": parsed_data.get("mag_x", 0),
+                "y": parsed_data.get("mag_y", 0),
+                "z": parsed_data.get("mag_z", 0)
+            },
             # Include mode and heart rate data from publisher
             "mode": parsed_data.get("mode", "game"),
             "heart_rate_bpm": parsed_data.get("heart_rate_bpm")
@@ -2431,207 +2210,6 @@ def on_message_subscribe(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessa
         error_msg = f"Error processing message: {e}"
         print(error_msg)
         logger.error(error_msg)
-
-def process_raw_sensor_data(parsed_data: Dict[str, Any], device_id: str) -> None:
-    """
-    Process raw sensor data from subscriber.py (direct function call).
-    
-    This function is called directly from subscriber.py to process parsed sensor data
-    without going through MQTT message handling.
-    
-    Args:
-        parsed_data: Dictionary containing parsed sensor data with fields:
-            - device_id, athlete_id, subhost_id, pm_id
-            - acc_x, acc_y, acc_z
-            - gyro_x, gyro_y, gyro_z
-            - magno (single value)
-            - pressure, temperature, btyVolt
-            - mode
-        device_id: Device ID string (e.g., "4" for PM004)
-    """
-    global sensor_data, unique_mqtt_topics
-    
-    # Lazy initialization: Initialize all components if not already initialized
-    # This allows subscriber.py to run independently and initialize components when needed
-    _initialize_components()
-    _initialize_health_monitor()
-    
-    # Initialize publish client if not already initialized
-    if not _publish_client_initialized:
-        _initialize_publish_client()
-    
-    try:
-        # Use device_id from parameter, fallback to parsed_data
-        device_id_str = device_id or str(parsed_data.get("device_id", "")).strip()
-        if not device_id_str:
-            logger.warning("No device_id provided, skipping processing")
-            return
-        device_id_str = _normalize_device_id(device_id_str)
-        
-        # Track unique data sources
-        source_key = f"subscriber_{device_id_str}"
-        unique_mqtt_topics.add(source_key)
-        
-        # Show that we received sensor data (less verbose)
-        athlete_id = parsed_data.get("athlete_id", device_id_str)
-        print(f"📥 Player {athlete_id} (Device {device_id_str}) - New sensor data from subscriber")
-        
-        # Log device activity and detect mode
-        mode = parsed_data.get("mode", "game")
-        _update_log_filename_if_needed(mode)
-        
-        # Dynamically scale model cache size based on active game-mode devices
-        try:
-            if mode == "game":
-                active_game_devices.add(device_id_str)
-                desired_cache_size = len(active_game_devices)
-                # Bound by number of available models
-                if desired_cache_size > model_loader.cache_size:
-                    new_cache_size = min(desired_cache_size, max_available_models)
-                    if new_cache_size != model_loader.cache_size:
-                        logger.info(
-                            f"Adjusting model cache size from {model_loader.cache_size} to {new_cache_size} (active game devices: {desired_cache_size})"
-                        )
-                        model_loader.cache_size = new_cache_size
-                        # Print cache info to console after resizing
-                        cache_info = model_loader.get_cache_info()
-                        print(
-                            f"🧠 Cache: {cache_info['cache_size']}/{cache_info['max_cache_size']} | "
-                            f"Hit: {cache_info['cache_hit_rate']:.1%} | "
-                            f"Loaded: {cache_info['models_loaded']} | "
-                            f"Evicted: {cache_info['models_evicted']} | "
-                            f"Cached: {cache_info['cached_models']}"
-                        )
-        except Exception:
-            # Do not interrupt message processing if scaling fails
-            pass
-        
-        # Only log device activity on first activation, not every message
-        if device_id_str not in device_contexts:
-            logger.info(f"Device {device_id_str} (Player {athlete_id}) - First activation, Mode: {mode}")
-            logger.info(f"Device {device_id_str} - MQTT prediction topic: predictions/{device_id_str}")
-
-        # Get or init per-device context and sync into globals
-        if device_id_str not in device_contexts:
-            _init_device_context(device_id_str)
-        ctx = device_contexts[device_id_str]
-        # Persist last seen mode for this device to support mode-specific summaries
-        try:
-            ctx["last_mode"] = mode
-        except Exception:
-            pass
-        _load_context_to_globals(ctx)
-        
-        # Optionally update athlete profile from payload if provided
-        name_in = parsed_data.get("name")
-        age_in = parsed_data.get("age")
-        weight_in = parsed_data.get("weight")
-        height_in = parsed_data.get("height")
-        gender_in = parsed_data.get("gender")          ## 'M'/'F' or 1/0
-        updated = False
-        if name_in is not None:
-            ctx["name"] = str(name_in)
-            updated = True
-        if age_in is not None:
-            try:
-                ctx["age"] = int(age_in)
-                updated = True
-            except Exception:
-                pass
-        if weight_in is not None:
-            try:
-                ctx["weight"] = float(weight_in)
-                updated = True
-            except Exception:
-                pass
-        if height_in is not None:
-            try:
-                ctx["height"] = float(height_in)
-                updated = True
-            except Exception:
-                pass
-        if gender_in is not None:
-            try:
-                if isinstance(gender_in, str):
-                    ctx["gender"] = 1 if gender_in.upper().startswith("M") else 0
-                else:
-                    ctx["gender"] = 1 if int(gender_in) == 1 else 0
-                updated = True
-            except Exception:
-                pass
-        if updated:
-            # update derived fields
-            ctx["hr_max"] = 220 - int(ctx.get("age", 25))
-            _load_context_to_globals(ctx)
-            print(f"Player {athlete_id}: Age={ctx['age']}, Weight={ctx['weight']}kg, Height={ctx['height']}cm, Gender={'Male' if ctx['gender'] == 1 else 'Female'}, HR_max={ctx['hr_max']}")
-            # Only log profile updates, not every data point
-        
-        # Update last data time for this device
-        ctx["last_data_time"] = time.time()
-        
-        # Extract and update position from parsed_data (x, y from LPS or publisher)
-        global latest_position
-        pos_x = parsed_data.get("x")
-        pos_y = parsed_data.get("y")
-        if pos_x is not None and pos_y is not None:
-            try:
-                latest_position["x"] = float(pos_x)
-                latest_position["y"] = float(pos_y)
-                # Debug: Log position updates for PM001
-                if device_id == "PM001":
-                    print(f"🔵 PM001 position updated in process_raw_sensor_data: ({latest_position['x']:.2f}, {latest_position['y']:.2f})")
-            except (ValueError, TypeError) as e:
-                print(f"⚠️  Error converting position for {device_id}: x={pos_x}, y={pos_y}, error={e}")
-        else:
-            # Debug: Log when position is not updated
-            if device_id == "PM001" and (pos_x is None or pos_y is None):
-                print(f"⚠️  PM001 position NOT updated in process_raw_sensor_data: x={pos_x}, y={pos_y} (from parsed_data)")
-        
-        # Store subhost_id and pm_id in context if provided
-        if "subhost_id" in parsed_data:
-            ctx["subhost_id"] = parsed_data["subhost_id"]
-        if "pm_id" in parsed_data:
-            ctx["pm_id"] = parsed_data["pm_id"]
-        
-        # Convert subscriber.py format to the expected format
-        # Handle magno as single value - convert to dict with same value for all axes
-        magno_value = parsed_data.get("magno", 0.0)
-        if isinstance(magno_value, (int, float)):
-            magno_dict = {"x": magno_value, "y": magno_value, "z": magno_value}
-        else:
-            magno_dict = {"x": 0, "y": 0, "z": 0}
-        
-        sensor_data = {
-            "acc": {
-                "x": parsed_data.get("acc_x", 0),
-                "y": parsed_data.get("acc_y", 0),
-                "z": parsed_data.get("acc_z", 0)
-            },
-            "gyro": {
-                "x": parsed_data.get("gyro_x", 0),
-                "y": parsed_data.get("gyro_y", 0),
-                "z": parsed_data.get("gyro_z", 0)
-            },
-            "magno": magno_dict,
-            # Include mode and heart rate data
-            "mode": parsed_data.get("mode", "game"),
-            "heart_rate_bpm": parsed_data.get("heart_rate_bpm")
-        }
-
-        # Process the data using globals mapped from this context
-        print(f"Processing Player {athlete_id} data...")
-        process_data()
-        print(f"Player {athlete_id} processing complete")
-        print(" ")                                      # Noticeable line break between players
-        # Persist updated globals back to context
-        _save_globals_to_context(ctx)
-
-    except Exception as e:
-        error_msg = f"Error processing raw sensor data: {e}"
-        print(error_msg)
-        logger.error(error_msg)
-        import traceback
-        traceback.print_exc()
 
 def check_session_end() -> bool:
     """
@@ -2768,36 +2346,42 @@ if __name__ == "__main__":
     subscribe_client.on_disconnect = on_disconnect_subscribe
     subscribe_client.on_message = on_message_subscribe
     logger.info(f"Connecting to SUBSCRIBE MQTT broker: {MQTT_SUBSCRIBE_BROKER}:{MQTT_SUBSCRIBE_PORT}")
+    subscribe_client.connect(MQTT_SUBSCRIBE_BROKER, MQTT_SUBSCRIBE_PORT, 60)
+    subscribe_client.loop_start()
+    
+    # Create PUBLISH client for network broker (publishing predictions)
+    publish_client = mqtt.Client()
+    publish_client.on_connect = on_connect_publish
+    publish_client.on_disconnect = on_disconnect_publish
+    logger.info(f"🔌 Connecting to PUBLISH MQTT broker: {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}")
     try:
-        result = subscribe_client.connect(MQTT_SUBSCRIBE_BROKER, MQTT_SUBSCRIBE_PORT, 60)
+        result = publish_client.connect(MQTT_PUBLISH_BROKER, MQTT_PUBLISH_PORT, 60)
         if result == mqtt.MQTT_ERR_SUCCESS:
-            logger.info("✅ SUBSCRIBE client connection initiated (will connect asynchronously)")
+            logger.info("✅ PUBLISH client connection initiated (will connect asynchronously)")
         else:
-            logger.warning(f"⚠️  SUBSCRIBE client connect() returned code: {result}")
-        subscribe_client.loop_start()
+            logger.warning(f"⚠️  PUBLISH client connect() returned code: {result}")
+        publish_client.loop_start()
         
         # Wait a moment and check connection status
         time.sleep(2)
-        if subscribe_client.is_connected():
-            logger.info("✅ SUBSCRIBE client is connected")
+        if publish_client.is_connected():
+            logger.info("✅ PUBLISH client is connected")
         else:
-            logger.warning(f"⚠️  SUBSCRIBE client not yet connected to {MQTT_SUBSCRIBE_BROKER}:{MQTT_SUBSCRIBE_PORT}")
-            logger.warning("   Check if broker is running and accessible. Will retry connection automatically.")
+            logger.warning(f"⚠️  PUBLISH client not yet connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}")
+            logger.warning("   Check if broker is running and accessible. Messages will be queued until connection is established.")
     except Exception as e:
-        logger.error(f"❌ Failed to connect to SUBSCRIBE MQTT broker ({MQTT_SUBSCRIBE_BROKER}:{MQTT_SUBSCRIBE_PORT}): {e}")
-        logger.warning("⚠️  Will retry connection automatically. Make sure the MQTT broker is running.")
+        logger.error(f"❌ Failed to connect to PUBLISH MQTT broker ({MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}): {e}")
+        logger.warning("⚠️  Predictions will be queued and published when broker becomes available")
         # Still start the loop - it will retry connection
-        subscribe_client.loop_start()
+        publish_client.loop_start()
     
-    # Ensure PUBLISH client is initialized (may already be initialized if imported)
-    _initialize_publish_client()
-    
-    # Get the global publish client (already initialized by _initialize_publish_client)
-    publish_client = client
+    # Store publish_client globally for fallback publishing
+    global client
+    client = publish_client
     
     logger.info(f"Starting test deployment in multi-device mode")
     logger.info(f"SUBSCRIBE broker: {MQTT_SUBSCRIBE_BROKER}:{MQTT_SUBSCRIBE_PORT} (topics: player/+/sensor/data, sensor/data)")
-    logger.info(f"PUBLISH broker: {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} (topics: predictions/PM001, predictions/PM002, ...)")
+    logger.info(f"PUBLISH broker: {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} (topics: PM001/predictions, PM002/predictions, ...)")
     # Reduced logging for subscription messages
 
     # Initialize separate timers for different purposes

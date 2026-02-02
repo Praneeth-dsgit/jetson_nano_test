@@ -247,7 +247,8 @@ class MQTTMessageQueue:
             self.stats["queue_size"] = len(self.message_queue)
             
             if self.enable_logging and self.logger:
-                self.logger.info(f"Message queued: {message_id} -> {topic}")
+                # Use debug level to reduce verbosity - only log when debugging
+                self.logger.debug(f"Message queued: {message_id} -> {topic}")
             
             return message_id
             
@@ -282,9 +283,23 @@ class MQTTMessageQueue:
                 time.sleep(0.1)
                 
             except Exception as e:
+                # Silently handle errors during shutdown
+                if self.stop_event.is_set():
+                    break
                 if self.enable_logging and self.logger:
                     self.logger.error(f"Error in message processing loop: {e}")
                 time.sleep(1.0)  # Wait longer on error
+    
+    def stop(self):
+        """Stop the message queue processing thread gracefully."""
+        if self.processing:
+            self.stop_event.set()
+            if self.processing_thread and self.processing_thread.is_alive():
+                # Wait for thread to finish (with timeout)
+                self.processing_thread.join(timeout=1.0)
+            self.processing = False
+            if self.enable_logging and self.logger:
+                self.logger.info("Message queue processing thread stopped")
     
     def _load_pending_messages(self):
         """Load pending messages from database."""

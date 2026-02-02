@@ -3,7 +3,7 @@
 
 # MQTT Configuration
 mqtt:
-  broker: "localhost"
+  broker: 192.168.5.111
   port: 1883
   timeout: 60
   keepalive: 60
@@ -20,8 +20,8 @@ devices:
 # Field Configuration
 field:
   # FIFA Standard Football Field Dimensions
-  length: 105.0  # meters
-  width: 60.0    # meters
+  length: 7.0   # meters
+  width: 3.5    # meters
   
   # Field Markings
   center_circle_radius: 9.15  # meters
@@ -36,12 +36,14 @@ field:
   goal_color: "yellow"
 
 # LPS Anchor Configuration
+# A1=top mid, A2=right mid, A3=bottom mid, A4=left mid
 anchors:
   positions:
-    - [0, 0]                    # Bottom-left corner
-    - [105, 0]                  # Bottom-right corner  
-    - [105, 60]                 # Top-right corner
-    - [0, 60]                   # Top-left corner
+    - [8.75, 10]                # A1: Top side midpoint
+    - [17.5, 5]                 # A2: Right side midpoint
+    - [8.75, 0]                 # A3: Bottom side midpoint
+    - [0, 5]                   # A4: Left side midpoint
+  titles: ["A1", "A2", "A3", "A4"]  # Tag titles for each anchor
   color: "red"
   size: 100
   label: "LPS Anchors"
@@ -49,7 +51,7 @@ anchors:
 # Visualization Settings
 visualization:
   figure_size: [16, 10]  # [width, height] in inches
-  update_interval: 200   # milliseconds
+  update_interval: 50   # milliseconds
   player_marker:
     color: "blue"
     size: 8
@@ -59,6 +61,7 @@ visualization:
     color: "blue"
     weight: "bold"
     offset: [1, 1]  # [x_offset, y_offset] from position
+    tag_title_prefix: "Tag: "   # Prefix for tag titles (empty string to hide)
 
 # G-Impact Event Configuration
 g_impact:

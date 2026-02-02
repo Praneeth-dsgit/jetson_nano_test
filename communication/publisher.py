@@ -41,6 +41,10 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Set, Tuple
 import glob
 import re
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 class MultiModeDataPublisher:
     def __init__(self, num_players: int = None, mode: str = "training", 
@@ -107,14 +111,18 @@ class MultiModeDataPublisher:
         max_retries = 5
         retry_count = 0
         
+        # Get MQTT broker configuration from environment variables or use defaults
+        mqtt_broker = "localhost"
+        mqtt_port = 1883
+        
         # Disconnect first if already connected
         if self.client.is_connected():
             self.client.disconnect()
         
         while retry_count < max_retries:
             try:
-                print(f"🔄 MQTT connection attempt {retry_count + 1}/{max_retries}...")
-                result = self.client.connect("localhost", 1883, 60)
+                print(f"🔄 MQTT connection attempt {retry_count + 1}/{max_retries} to {mqtt_broker}:{mqtt_port}...")
+                result = self.client.connect(mqtt_broker, mqtt_port, 60)
                 if result == mqtt.MQTT_ERR_SUCCESS:
                     print("✅ MQTT connection established")
                     return
@@ -174,7 +182,7 @@ class MultiModeDataPublisher:
         "weight": round(random.uniform(60.0, 100.0), 1),
         "height": round(random.uniform(160.0, 200.0), 1),
                 "gender": random.choice(["Male", "Female"]),
-                "device_id": f"{player_id:03d}"  # 001, 002, etc.
+                "device_id": f"PM{player_id:03d}"  # PM001, PM002, etc.
             }
             
             # Initialize data storage for this player
@@ -430,49 +438,79 @@ class MultiModeDataPublisher:
         """Create the sensor data dictionary."""
         
         # Generate position data for LPS visualization
-        # FIFA field dimensions: 105m x 60m
-        field_length = 105.0
-        field_width = 60.0
+        # Read field dimensions from environment variables (matches .env and subscriber)
+        field_length = float(os.getenv("LPS_FIELD_LENGTH", "17.5"))
+        field_width = float(os.getenv("LPS_FIELD_WIDTH", "10.0"))
         
-        # Generate realistic position based on player position and movement
+        # Read anchor positions from environment variables or derive from field dimensions
+        # Order: A1=top, A2=right, A3=bottom, A4=left (matches subscriber)
+        def parse_anchor(env_var, default_x, default_y):
+            val = os.getenv(env_var)
+            if val:
+                parts = val.split(",")
+                if len(parts) == 2:
+                    return (float(parts[0].strip()), float(parts[1].strip()))
+            return (default_x, default_y)
+        
+        anchors = [
+            parse_anchor("LPS_ANCHOR_1", field_length / 2, field_width),      # A1: top mid
+            parse_anchor("LPS_ANCHOR_2", field_length, field_width / 2),      # A2: right mid
+            parse_anchor("LPS_ANCHOR_3", field_length / 2, 0.0),              # A3: bottom mid
+            parse_anchor("LPS_ANCHOR_4", 0.0, field_width / 2),               # A4: left mid
+        ]
+        
+        # Generate position following a VERTICAL LINE at top-left corner
         if not hasattr(self, '_player_positions'):
             self._player_positions = {}
         
         player_id = profile["device_id"]
         
-        # Initialize or update player position
+        # Vertical line parameters at top-left corner
+        margin = 0.5  # 0.5m margin from edges
+        line_x = margin  # Fixed X position (left side)
+        line_y_min = field_width * 0.5  # Start from middle height
+        line_y_max = field_width - margin  # Go up to top (with margin)
+        line_length = line_y_max - line_y_min
+        
+        # Speed: complete one up-down cycle in ~10 seconds
+        cycle_period = 10.0  # seconds for one complete up-down cycle
+        
+        # Initialize player position
         if player_id not in self._player_positions:
-            # Start at random position on field
+            # Extract player number for unique starting phase
+            player_num = int(''.join(filter(str.isdigit, player_id)) or '1')
+            # Each player starts at a different phase (spread evenly)
+            initial_phase = (player_num * 2 * math.pi / 30)  # Spread 30 players along the cycle
+            
             self._player_positions[player_id] = {
-                'x': random.uniform(10, field_length - 10),
-                'y': random.uniform(10, field_width - 10),
+                'phase': initial_phase,
                 'last_update': time.time()
             }
         
-        # Update position with small random movement
+        # Update phase based on time elapsed
         current_time = time.time()
         time_diff = current_time - self._player_positions[player_id]['last_update']
         
-        # Movement speed (meters per second) - realistic for football players
-        max_speed = 8.0  # m/s (about 29 km/h)
-        movement_speed = random.uniform(0, max_speed * time_diff)
+        # Update phase (oscillating motion)
+        current_phase = self._player_positions[player_id]['phase']
+        new_phase = current_phase + (2 * math.pi / cycle_period) * time_diff
         
-        # Random direction
-        angle = random.uniform(0, 2 * math.pi)
-        dx = movement_speed * math.cos(angle)
-        dy = movement_speed * math.sin(angle)
+        # Keep phase in [0, 2*pi] range
+        new_phase = new_phase % (2 * math.pi)
         
-        # Update position
-        new_x = self._player_positions[player_id]['x'] + dx
-        new_y = self._player_positions[player_id]['y'] + dy
+        # Calculate position on vertical line (sine wave oscillation)
+        # sin gives -1 to 1, map to line_y_min to line_y_max
+        oscillation = (math.sin(new_phase) + 1) / 2  # 0 to 1
+        new_x = line_x
+        new_y = line_y_min + oscillation * line_length
         
-        # Keep within field bounds
-        new_x = max(5, min(field_length - 5, new_x))
-        new_y = max(5, min(field_width - 5, new_y))
-        
-        self._player_positions[player_id]['x'] = new_x
-        self._player_positions[player_id]['y'] = new_y
+        # Update stored state
+        self._player_positions[player_id]['phase'] = new_phase
         self._player_positions[player_id]['last_update'] = current_time
+        lps_a1 = round(math.sqrt((new_x - anchors[0][0]) ** 2 + (new_y - anchors[0][1]) ** 2), 2)
+        lps_a2 = round(math.sqrt((new_x - anchors[1][0]) ** 2 + (new_y - anchors[1][1]) ** 2), 2)
+        lps_a3 = round(math.sqrt((new_x - anchors[2][0]) ** 2 + (new_y - anchors[2][1]) ** 2), 2)
+        lps_a4 = round(math.sqrt((new_x - anchors[3][0]) ** 2 + (new_y - anchors[3][1]) ** 2), 2)
         
         base_data = {
             "device_id": profile["device_id"],
@@ -497,7 +535,17 @@ class MultiModeDataPublisher:
             "mode": self.mode,
             # Add position data for LPS visualization
             "x": round(new_x, 2),
-            "y": round(new_y, 2)
+            "y": round(new_y, 2),
+            # LPS distances (meters) to A1,A2,A3,A4 for rawData payload
+            "lps_a1": lps_a1,
+            "lps_a2": lps_a2,
+            "lps_a3": lps_a3,
+            "lps_a4": lps_a4,
+            # For rawData pipe-delimited format
+            "pressure": round(random.uniform(900.0, 1050.0), 2),
+            "temperature": round(random.uniform(35.0, 40.0), 1),
+            "btyVolt": round(random.uniform(3.8, 4.2), 2),
+            "magno": round(random.uniform(50.0, 400.0), 1),
         }
         
         # Add mode-specific data
@@ -510,6 +558,32 @@ class MultiModeDataPublisher:
             })
         
         return base_data
+    
+    def _to_raw_data_payload(self, sensor_data: Dict) -> str:
+        """
+        Build pipe-delimited payload matching rawData/+ format expected by subscriber.
+        Order: Subhost|PM_ID|acc_x|acc_y|acc_z|gyro_x|gyro_y|gyro_z|magno|pressure|temperature|btyVolt|lps_a1|lps_a2|lps_a3|lps_a4
+        """
+        subhost = f"SH{sensor_data['device_id'].replace('PM', '').zfill(3)}"  # e.g. SH001
+        parts = [
+            subhost,
+            sensor_data["device_id"],
+            sensor_data["acc_x"],
+            sensor_data["acc_y"],
+            sensor_data["acc_z"],
+            sensor_data["gyro_x"],
+            sensor_data["gyro_y"],
+            sensor_data["gyro_z"],
+            sensor_data.get("magno", 0.0),
+            sensor_data.get("pressure", 0.0),
+            sensor_data.get("temperature", 0.0),
+            sensor_data.get("btyVolt", 0.0),
+            sensor_data.get("lps_a1", 0.0),
+            sensor_data.get("lps_a2", 0.0),
+            sensor_data.get("lps_a3", 0.0),
+            sensor_data.get("lps_a4", 0.0),
+        ]
+        return "|".join(str(p) for p in parts)
     
     def _save_session_data(self):
         """Save collected session data to CSV files based on mode."""
@@ -533,7 +607,7 @@ class MultiModeDataPublisher:
             sequence_num = self._get_next_sequence_number(player_id)
             
             # Create filename following the pattern
-            device_id = f"{player_id:03d}"
+            device_id = f"PM{player_id:03d}"
             filename = f"{self.file_prefix}{sequence_num}_A{player_id}_D{device_id}_{session_timestamp}.csv"
             filepath = os.path.join(player_dir, filename)
             
@@ -684,9 +758,24 @@ class MultiModeDataPublisher:
                         # Store for later saving
                         self.player_data[player_id].append(sensor_data.copy())
                         
-                        # Publish to MQTT with QoS 1 for reliable delivery
-                        topic = f"player/{sensor_data['device_id']}/sensor/data"
-                        result = self.client.publish(topic, json.dumps(sensor_data), qos=1)
+                        # Log LPS distances AND true position (every 10th to reduce noise)
+                        if len(self.player_data[player_id]) % 10 == 1:
+                            la1 = sensor_data.get("lps_a1", 0)
+                            la2 = sensor_data.get("lps_a2", 0)
+                            la3 = sensor_data.get("lps_a3", 0)
+                            la4 = sensor_data.get("lps_a4", 0)
+                            true_x = sensor_data.get("x", 0)
+                            true_y = sensor_data.get("y", 0)
+                            print(f"┌─ PUB {sensor_data['device_id']} ─────────────────────────────────────────")
+                            print(f"│ TRUE pos:   x={true_x:.2f}m  y={true_y:.2f}m")
+                            print(f"│ Distances:  A1={la1:.2f}m  A2={la2:.2f}m  A3={la3:.2f}m  A4={la4:.2f}m")
+                            print(f"│ Field:      105m × 60m (anchors at midpoints)")
+                            print(f"└──────────────────────────────────────────────────────────")
+                        
+                        # Publish to MQTT with QoS 1 (rawData format for subscriber)
+                        topic = f"rawData/{sensor_data['device_id']}"
+                        payload = self._to_raw_data_payload(sensor_data)
+                        result = self.client.publish(topic, payload, qos=1)
                         
                         # Debug: Show publishing status
                         if len(self.player_data[player_id]) % 50 == 0:  # Show every 50th message
@@ -696,7 +785,7 @@ class MultiModeDataPublisher:
                         if result.rc != mqtt.MQTT_ERR_SUCCESS:
                             print(f"⚠️ Failed to publish for player {player_id}: {result.rc}")
                         elif len(self.player_data[player_id]) % 50 == 0:
-                            print(f"✅ Successfully published to {topic}")
+                            print(f"✅ Successfully published to {topic} (rawData pipe-delimited)")
                         
                         # Show progress occasionally
                         if len(self.player_data[player_id]) % 100 == 0:

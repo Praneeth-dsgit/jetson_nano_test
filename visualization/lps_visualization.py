@@ -23,6 +23,10 @@ import signal
 import sys
 from pathlib import Path
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -65,16 +69,38 @@ class LPSConfig:
             self.device_topic_pattern = topic_patterns.get('lps_specific', 'lps/data/{device_id}')
             self.legacy_topic_pattern = topic_patterns.get('legacy', 'player/{device_id}/sensor/data')
             
-            # Field settings
+            # Field settings - check environment variables first, then config file, then defaults
             field_config = config.get('field', {})
-            self.field_length = field_config.get('length', 105.0)
-            self.field_width = field_config.get('width', 60.0)
-            self.center_circle_radius = field_config.get('center_circle_radius', 9.15)
+            # Use same env vars as subscriber for consistency
+            self.field_length = float(os.getenv("LPS_FIELD_LENGTH", 
+                                                 str(field_config.get('length', 105.0))))
+            self.field_width = float(os.getenv("LPS_FIELD_WIDTH", 
+                                                str(field_config.get('width', 60.0))))
             
-            penalty_area = field_config.get('penalty_area', {})
-            self.penalty_length = penalty_area.get('length', 16.5)
-            self.penalty_width = penalty_area.get('width', 40.3)
-            self.goal_width = field_config.get('goal_width', 7.32)
+            # FIFA standard dimensions for scaling reference
+            FIFA_LENGTH = 105.0
+            FIFA_WIDTH = 60.0
+            FIFA_CENTER_CIRCLE_RADIUS = 9.15
+            FIFA_PENALTY_LENGTH = 16.5
+            FIFA_PENALTY_WIDTH = 40.3
+            FIFA_GOAL_WIDTH = 7.32
+            
+            # Calculate scaling factors based on FIFA standard
+            # Always scale from FIFA standard to maintain proper proportions
+            length_scale = self.field_length / FIFA_LENGTH
+            width_scale = self.field_width / FIFA_WIDTH
+            avg_scale = (length_scale + width_scale) / 2
+            
+            # Scale inner elements proportionally from FIFA standard
+            # Center circle uses average scale (circular element)
+            self.center_circle_radius = FIFA_CENTER_CIRCLE_RADIUS * avg_scale
+            
+            # Penalty area scales with field dimensions (rectangular elements)
+            self.penalty_length = FIFA_PENALTY_LENGTH * length_scale
+            self.penalty_width = FIFA_PENALTY_WIDTH * width_scale
+            
+            # Goal width scales with field width
+            self.goal_width = FIFA_GOAL_WIDTH * width_scale
             
             field_viz = field_config.get('visualization', {})
             self.field_bg_color = field_viz.get('background_color', '#228B22')
@@ -96,6 +122,11 @@ class LPSConfig:
             self.label_color = player_labels.get('color', 'blue')
             self.label_weight = player_labels.get('weight', 'bold')
             self.label_offset = player_labels.get('offset', [1, 1])
+            self.tag_title_prefix = player_labels.get('tag_title_prefix', 'Tag: ')
+            
+            # Anchor titles (from anchors config if present)
+            anchor_config = config.get('anchors', {})
+            self.anchor_titles = anchor_config.get('titles', ['A1', 'A2', 'A3', 'A4'])
             
             # G-impact settings
             g_impact_config = config.get('g_impact', {})
@@ -189,10 +220,25 @@ class LPSConfig:
         self.legacy_topic_pattern = "player/{device_id}/sensor/data"
         self.field_length = 105.0
         self.field_width = 60.0
-        self.center_circle_radius = 9.15
-        self.penalty_length = 16.5
-        self.penalty_width = 40.3
-        self.goal_width = 7.32
+        
+        # FIFA standard dimensions for scaling reference
+        FIFA_LENGTH = 105.0
+        FIFA_WIDTH = 60.0
+        FIFA_CENTER_CIRCLE_RADIUS = 9.15
+        FIFA_PENALTY_LENGTH = 16.5
+        FIFA_PENALTY_WIDTH = 40.3
+        FIFA_GOAL_WIDTH = 7.32
+        
+        # Calculate scaling factors
+        length_scale = self.field_length / FIFA_LENGTH
+        width_scale = self.field_width / FIFA_WIDTH
+        avg_scale = (length_scale + width_scale) / 2
+        
+        # Scale inner elements proportionally
+        self.center_circle_radius = FIFA_CENTER_CIRCLE_RADIUS * avg_scale
+        self.penalty_length = FIFA_PENALTY_LENGTH * length_scale
+        self.penalty_width = FIFA_PENALTY_WIDTH * width_scale
+        self.goal_width = FIFA_GOAL_WIDTH * width_scale
         self.field_bg_color = '#228B22'
         self.field_line_color = 'white'
         self.goal_color = 'yellow'
@@ -205,6 +251,8 @@ class LPSConfig:
         self.label_color = 'blue'
         self.label_weight = 'bold'
         self.label_offset = [1, 1]
+        self.tag_title_prefix = 'Tag: '
+        self.anchor_titles = ['A1', 'A2', 'A3', 'A4']
         self.g_impact_log_pattern = '*/*_g_impact_log.json'
         self.g_impact_color = 'red'
         self.g_impact_marker = 'D'
@@ -262,9 +310,33 @@ class LPSConfig:
 class LPSVisualizer:
     """Live Position System Visualizer with MQTT integration"""
     
+    def _normalize_device_id(self, device_id: str) -> str:
+        """
+        Normalize device ID to PM### format.
+        Handles: "001", "1", "PM001", "PM1" -> "PM001"
+        """
+        if not device_id:
+            return "PM000"
+        
+        device_id = str(device_id).strip()
+        
+        # Remove PM prefix if present to extract numeric part
+        if device_id.upper().startswith("PM"):
+            numeric_part = device_id[2:].lstrip('0') or "0"
+        else:
+            numeric_part = device_id.lstrip('0') or "0"
+        
+        try:
+            # Convert to int and format as PM### 
+            device_num = int(numeric_part)
+            return f"PM{device_num:03d}"
+        except ValueError:
+            return "PM000"
+    
     def __init__(self, config: LPSConfig):
         self.config = config
-        self.device_ids = [f"{i:03d}" for i in range(1, config.num_devices + 1)]
+        # Use PM001, PM002, ... format for device IDs
+        self.device_ids = [f"PM{i:03d}" for i in range(1, config.num_devices + 1)]
         
         # Store latest positions for each device {device_id: (x, y, timestamp)}
         self.device_positions: Dict[str, Tuple[float, float, float]] = {
@@ -550,16 +622,53 @@ class LPSVisualizer:
         self.ax.grid(False)
     
     def _plot_anchors(self):
-        """Plot sensor anchor positions"""
-        sensors = np.array([
-            [0, 0],                                    # Bottom-left
-            [self.config.field_length, 0],            # Bottom-right
-            [self.config.field_length, self.config.field_width],  # Top-right
-            [0, self.config.field_width]              # Top-left
-        ])
+        """Plot sensor anchor positions: A1=top mid, A2=right mid, A3=bottom mid, A4=left mid
+        
+        Reads from LPS_ANCHOR_1 to LPS_ANCHOR_4 env vars if set, otherwise uses defaults.
+        """
+        # Default positions (midpoints)
+        defaults = [
+            (self.config.field_length / 2, self.config.field_width),   # A1: Top mid
+            (self.config.field_length, self.config.field_width / 2),   # A2: Right mid
+            (self.config.field_length / 2, 0),                         # A3: Bottom mid
+            (0, self.config.field_width / 2)                           # A4: Left mid
+        ]
+        
+        # Read from env vars if set
+        anchor_positions = []
+        for i in range(1, 5):
+            env_var = f"LPS_ANCHOR_{i}"
+            anchor_str = os.getenv(env_var)
+            if anchor_str:
+                try:
+                    parts = anchor_str.split(',')
+                    if len(parts) == 2:
+                        x, y = float(parts[0].strip()), float(parts[1].strip())
+                        anchor_positions.append((x, y))
+                        logger.debug(f"Loaded {env_var} from env: ({x}, {y})")
+                    else:
+                        anchor_positions.append(defaults[i-1])
+                except (ValueError, AttributeError):
+                    anchor_positions.append(defaults[i-1])
+            else:
+                anchor_positions.append(defaults[i-1])
+        
+        sensors = np.array(anchor_positions)
+        logger.info(f"Using anchor positions: A1={anchor_positions[0]}, A2={anchor_positions[1]}, A3={anchor_positions[2]}, A4={anchor_positions[3]}")
         
         self.ax.scatter(sensors[:, 0], sensors[:, 1], 
                        color='red', label="LPS Anchors", s=100, zorder=5)
+        
+        # Add tag titles for each anchor (A1 above, A2 right, A3 below, A4 left)
+        scale = max(self.config.field_length, self.config.field_width) * 0.02
+        offsets = [(0, scale), (scale, 0), (0, -scale), (-scale, 0)]   # above, right, below, left
+        haligns = ['center', 'left', 'center', 'right']
+        valigns = ['bottom', 'center', 'top', 'center']
+        for i, (s, o, ha, va) in enumerate(zip(sensors, offsets, haligns, valigns)):
+            title = self.config.anchor_titles[i] if i < len(self.config.anchor_titles) else f'A{i+1}'
+            self.ax.text(s[0] + o[0], s[1] + o[1], title,
+                         fontsize=9, color='white', weight='bold',
+                         ha=ha, va=va, zorder=5)
     
     def _setup_dynamic_elements(self):
         """Setup dynamic plot elements for device tracking"""
@@ -696,15 +805,17 @@ class LPSVisualizer:
             self.connected = True
             logger.info(f"Connected to MQTT broker: {self.config.mqtt_broker}:{self.config.mqtt_port}")
             
-            # Subscribe to LPS topics
+            # Subscribe to LPS topics and predictions topics
             for dev_id in self.device_ids:
                 # Try both LPS-specific and legacy topics
                 lps_topic = self.config.device_topic_pattern.format(device_id=dev_id)
                 legacy_topic = self.config.legacy_topic_pattern.format(device_id=dev_id)
+                predictions_topic = f"predictions/{dev_id}"
                 
                 client.subscribe(lps_topic)
                 client.subscribe(legacy_topic)
-                logger.debug(f"Subscribed to {lps_topic} and {legacy_topic}")
+                client.subscribe(predictions_topic)
+                logger.debug(f"Subscribed to {lps_topic}, {legacy_topic}, and {predictions_topic}")
         else:
             self.connected = False
             logger.error(f"Failed to connect to MQTT broker with result code: {rc}")
@@ -733,21 +844,49 @@ class LPSVisualizer:
                     except IndexError:
                         logger.warning(f"Could not extract device ID from topic: {msg.topic}")
                         return
+                elif msg.topic.startswith("predictions/"):
+                    # Extract from predictions/PM001 format
+                    try:
+                        device_id = msg.topic.split("/")[1]
+                    except IndexError:
+                        logger.warning(f"Could not extract device ID from predictions topic: {msg.topic}")
+                        return
                 else:
                     logger.warning(f"No device ID in payload and topic doesn't match pattern: {msg.topic}")
                     return
             
-            device_id = device_id.zfill(3)
+            # Normalize device ID to PM### format (preserve PM prefix)
+            original_device_id = device_id
+            device_id = self._normalize_device_id(device_id)
+            logger.debug(f"Device ID normalized: '{original_device_id}' -> '{device_id}'")
             
-            # Extract position data using configured field names
+            # Extract position data - check multiple possible locations
+            x = None
+            y = None
+            
+            # Try direct x, y fields first
             x = payload.get(self.config.x_field)
             y = payload.get(self.config.y_field)
             
+            # Try nested position object (from predictions topic)
+            if x is None or y is None:
+                position_obj = payload.get("position")
+                if position_obj and isinstance(position_obj, dict):
+                    x = position_obj.get("x")
+                    y = position_obj.get("y")
+                    logger.debug(f"Found position in nested object: x={x}, y={y}")
+            
             if x is not None and y is not None:
                 try:
+                    # Check if device_id exists in our tracking list
+                    if device_id not in self.device_positions:
+                        logger.warning(f"Device {device_id} not in tracking list. Available devices: {list(self.device_positions.keys())[:5]}...")
+                        # Try to add it anyway (might be a new device)
+                        self.device_positions[device_id] = (np.nan, np.nan, 0.0)
+                    
                     # Update position with timestamp
                     self.device_positions[device_id] = (float(x), float(y), time.time())
-                    logger.info(f"Updated position for device {device_id}: ({x}, {y})")
+                    logger.info(f"✅ Updated position for device {device_id}: ({x:.2f}, {y:.2f}) from topic {msg.topic}")
                     
                     # Collect data for heatmap if enabled
                     if self.heatmap_enabled:
@@ -757,8 +896,8 @@ class LPSVisualizer:
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Invalid position data for device {device_id}: x={x}, y={y}, error={e}")
             else:
-                logger.debug(f"No position data in message for device {device_id}")
-                logger.debug(f"Message payload: {payload}")
+                logger.debug(f"No position data in message for device {device_id} (topic: {msg.topic})")
+                logger.debug(f"Message payload keys: {list(payload.keys())}")
             
         except json.JSONDecodeError as e:
             logger.error(f"Failed to decode JSON message: {e}")
@@ -797,20 +936,28 @@ class LPSVisualizer:
         self.points.set_data(xs, ys)
         
         # Update player labels with athlete names if available
+        # Scale label offset proportionally to field size (for small fields, use smaller offset)
+        # Base offset is for 105m × 60m field, scale down for smaller fields
+        scale_factor = min(self.config.field_length / 105.0, self.config.field_width / 60.0)
+        scale_factor = max(0.1, scale_factor)  # Minimum 10% of base offset
+        scaled_offset_x = self.config.label_offset[0] * scale_factor
+        scaled_offset_y = self.config.label_offset[1] * scale_factor
+        
         for idx, (x, y) in enumerate(zip(xs, ys)):
             if not np.isnan(x) and not np.isnan(y):
                 dev_id = self.device_ids[idx]
                 
-                # Create label with device ID and athlete name if available
-                label_text = dev_id
+                # Create tag title with device ID and athlete name if available
+                prefix = getattr(self.config, 'tag_title_prefix', '') or ''
+                label_text = f"{prefix}{dev_id}"
                 if dev_id in self.athlete_profiles:
                     profile = self.athlete_profiles[dev_id]
                     athlete_id = profile.get('athlete_id', '')
                     if athlete_id:
-                        label_text = f"{dev_id}\nA{athlete_id}"
+                        label_text = f"{prefix}{dev_id}\nA{athlete_id}"
                 
-                self.labels[idx].set_position((x + self.config.label_offset[0], 
-                                             y + self.config.label_offset[1]))
+                self.labels[idx].set_position((x + scaled_offset_x, 
+                                             y + scaled_offset_y))
                 self.labels[idx].set_text(label_text)
                 self.labels[idx].set_visible(True)
             else:
@@ -906,6 +1053,8 @@ def main():
     parser.add_argument('--mode', choices=['training', 'game'], help='Session mode')
     parser.add_argument('--heatmap', action='store_true', help='Enable heatmap data collection')
     parser.add_argument('--no-heatmap', action='store_true', help='Disable heatmap data collection')
+    parser.add_argument('--length', type=float, help='Field length in meters (default: from LPS_FIELD_LENGTH env var or config)')
+    parser.add_argument('--width', type=float, help='Field width in meters (default: from LPS_FIELD_WIDTH env var or config)')
     
     args = parser.parse_args()
     
@@ -926,6 +1075,40 @@ def main():
             config.heatmap_enabled = True
         if args.no_heatmap:
             config.heatmap_enabled = False
+        if args.length:
+            config.field_length = args.length
+            # Also set env var so subscriber can use same value
+            os.environ["LPS_FIELD_LENGTH"] = str(args.length)
+            logger.info(f"📏 Field length set to {args.length}m (from CLI)")
+        if args.width:
+            config.field_width = args.width
+            # Also set env var so subscriber can use same value
+            os.environ["LPS_FIELD_WIDTH"] = str(args.width)
+            logger.info(f"📏 Field width set to {args.width}m (from CLI)")
+        
+        # Log final field dimensions being used
+        logger.info(f"📐 Visualization using field dimensions: {config.field_length}m × {config.field_width}m")
+        
+        # Recalculate scaled inner elements if field dimensions changed
+        if args.length or args.width:
+            # FIFA standard dimensions for scaling reference
+            FIFA_LENGTH = 105.0
+            FIFA_WIDTH = 60.0
+            FIFA_CENTER_CIRCLE_RADIUS = 9.15
+            FIFA_PENALTY_LENGTH = 16.5
+            FIFA_PENALTY_WIDTH = 40.3
+            FIFA_GOAL_WIDTH = 7.32
+            
+            # Calculate scaling factors
+            length_scale = config.field_length / FIFA_LENGTH
+            width_scale = config.field_width / FIFA_WIDTH
+            avg_scale = (length_scale + width_scale) / 2
+            
+            # Scale inner elements proportionally
+            config.center_circle_radius = FIFA_CENTER_CIRCLE_RADIUS * avg_scale
+            config.penalty_length = FIFA_PENALTY_LENGTH * length_scale
+            config.penalty_width = FIFA_PENALTY_WIDTH * width_scale
+            config.goal_width = FIFA_GOAL_WIDTH * width_scale
         
         logger.info(f"Starting LPS Visualization with {config.num_devices} devices")
         logger.info(f"MQTT Broker: {config.mqtt_broker}:{config.mqtt_port}")
