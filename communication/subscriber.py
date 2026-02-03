@@ -29,10 +29,13 @@ Examples:
 
 import paho.mqtt.client as mqtt
 import json
+import logging
 import sys
 import signal
 import time
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 from typing import Dict, Optional, Set, Tuple, List
 import numpy as np
 from dotenv import load_dotenv
@@ -343,10 +346,10 @@ def trilaterate_position(
     fl = field_length if field_length is not None else float(os.getenv("LPS_FIELD_LENGTH", "105.0"))
     fw = field_width if field_width is not None else float(os.getenv("LPS_FIELD_WIDTH", "60.0"))
     
-    # DEBUG: Show valid anchors and distances being used
-    debug_trilat = os.getenv("LPS_DEBUG_TRILAT", "1") == "1"
+    # DEBUG: Show valid anchors and distances (only when LPS_DEBUG_TRILAT=1 and log level is DEBUG)
+    debug_trilat = os.getenv("LPS_DEBUG_TRILAT", "0") == "1"
     if debug_trilat:
-        print(f"   🔬 TRILAT: valid_anchors={valid_anchors.tolist()}, valid_distances={valid_distances.tolist()}")
+        logger.debug("TRILAT: valid_anchors=%s, valid_distances=%s", valid_anchors.tolist(), valid_distances.tolist())
     
     # Use CONSTRAINED optimization - only search within field bounds
     # This ensures the position is always inside the field (semi-circles intersecting within bounds)
@@ -373,7 +376,7 @@ def trilaterate_position(
     if result.success:
         x, y = result.x[0], result.x[1]
         if debug_trilat:
-            print(f"   🔬 TRILAT (bounded): solution=({x:.3f}, {y:.3f}), error={result.fun:.3f}")
+            logger.debug("TRILAT (bounded): solution=(%.3f, %.3f), error=%.3f", x, y, result.fun)
     else:
         # Fallback to unconstrained least-squares
         n = len(valid_anchors)
@@ -396,7 +399,7 @@ def trilaterate_position(
             position = np.linalg.lstsq(A, b, rcond=None)[0]
             x, y = position[0], position[1]
             if debug_trilat:
-                print(f"   🔬 TRILAT (fallback lstsq): solution=({x:.3f}, {y:.3f})")
+                logger.debug("TRILAT (fallback lstsq): solution=(%.3f, %.3f)", x, y)
         except np.linalg.LinAlgError:
             return None, None, 0.0
     

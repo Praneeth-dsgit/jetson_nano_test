@@ -66,7 +66,7 @@ class LPSConfig:
             self.position_timeout = device_config.get('position_timeout', 5.0)
             
             topic_patterns = device_config.get('topic_patterns', {})
-            self.device_topic_pattern = topic_patterns.get('lps_specific', 'lps/data/{device_id}')
+            self.device_topic_pattern = topic_patterns.get('lps_specific', 'lps/{device_id}')
             self.legacy_topic_pattern = topic_patterns.get('legacy', 'player/{device_id}/sensor/data')
             
             # Field settings - check environment variables first, then config file, then defaults
@@ -216,7 +216,7 @@ class LPSConfig:
         self.mqtt_reconnect_delay = 5
         self.num_devices = 30
         self.position_timeout = 5.0
-        self.device_topic_pattern = "lps/data/{device_id}"
+        self.device_topic_pattern = "lps/{device_id}"
         self.legacy_topic_pattern = "player/{device_id}/sensor/data"
         self.field_length = 105.0
         self.field_width = 60.0
@@ -875,6 +875,13 @@ class LPSVisualizer:
                     x = position_obj.get("x")
                     y = position_obj.get("y")
                     logger.debug(f"Found position in nested object: x={x}, y={y}")
+            # Try positions object (from lps/+ topic)
+            if x is None or y is None:
+                positions_obj = payload.get("positions")
+                if positions_obj and isinstance(positions_obj, dict):
+                    x = positions_obj.get("x")
+                    y = positions_obj.get("y")
+                    logger.debug(f"Found position in positions object: x={x}, y={y}")
             
             if x is not None and y is not None:
                 try:
@@ -886,7 +893,11 @@ class LPSVisualizer:
                     
                     # Update position with timestamp
                     self.device_positions[device_id] = (float(x), float(y), time.time())
-                    logger.info(f"✅ Updated position for device {device_id}: ({x:.2f}, {y:.2f}) from topic {msg.topic}")
+                    # Log lps/ updates at INFO (primary low-latency source); predictions/ at DEBUG to reduce noise
+                    if msg.topic.startswith("lps/"):
+                        logger.info(f"[OK] Updated position for device {device_id}: ({x:.2f}, {y:.2f}) from topic {msg.topic}")
+                    else:
+                        logger.debug(f"Updated position for device {device_id}: ({x:.2f}, {y:.2f}) from topic {msg.topic}")
                     
                     # Collect data for heatmap if enabled
                     if self.heatmap_enabled:

@@ -157,7 +157,7 @@ def _init_device_context(device_id_str: str) -> Dict[str, Any]:
         "gender": gender_val,
         "hr_rest": 60,
         "hr_max": 220 - age_val,
-        "MQTT_PUBLISH_TOPIC": f"predictions/{normalized_device_id}",
+        "MQTT_PUBLISH_TOPIC": f"{MQTT_TOPIC_PREDICTIONS_PREFIX}/{normalized_device_id}",
         # Filters and state
         "madgwick_quaternion": np.array([1.0, 0.0, 0.0, 0.0]),
         "hr_buffer": deque(maxlen=ROLLING_WINDOW_SIZE),
@@ -370,7 +370,7 @@ def print_memory_usage(label: str = "", detailed: bool = False) -> None:
             status = get_memory_status()
             
             if "error" in status:
-                print(f"❌ Memory monitoring error: {status['error']}")
+                print(f"[ERR] Memory monitoring error: {status['error']}")
                 return
             
             cpu = status["cpu"]
@@ -400,7 +400,7 @@ def print_memory_usage(label: str = "", detailed: bool = False) -> None:
             print(f"💾 Memory{label}: {memory_mb:.0f} MB")
             
     except Exception as e:
-        print(f"❌ Memory monitoring failed: {e}")
+        print(f"[ERR] Memory monitoring failed: {e}")
 
 def print_detailed_memory_usage(label: str = "") -> None:
     """Print detailed CPU + GPU memory usage with system info (legacy function for compatibility)"""
@@ -591,7 +591,7 @@ def _initialize_publish_client():
         
         # Add error callback for better diagnostics
         def on_publish_error(client, userdata, error):
-            logger.error(f"❌ PUBLISH client error: {error}")
+            logger.error(f"[ERR] PUBLISH client error: {error}")
         publish_client.on_socket_open = lambda client, userdata, sock: logger.debug("PUBLISH socket opened")
         publish_client.on_socket_close = lambda client, userdata, sock: logger.warning("PUBLISH socket closed")
         
@@ -600,26 +600,26 @@ def _initialize_publish_client():
             logger.info(f"   Attempting to connect to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}...")
             result = publish_client.connect(MQTT_PUBLISH_BROKER, MQTT_PUBLISH_PORT, 60)
             if result == mqtt.MQTT_ERR_SUCCESS:
-                logger.info("✅ PUBLISH client connection initiated (will connect asynchronously)")
+                logger.info("[OK] PUBLISH client connection initiated (will connect asynchronously)")
             else:
-                logger.warning(f"⚠️  PUBLISH client connect() returned code: {result}")
+                logger.warning(f"[WARN]  PUBLISH client connect() returned code: {result}")
                 logger.warning(f"   Error codes: 0=Success, 1=Connection refused, 2=Identifier rejected, 3=Server unavailable, 4=Bad credentials, 5=Not authorized")
             publish_client.loop_start()
             
             # Wait longer for connection to establish (async connection)
             time.sleep(2)
             if publish_client.is_connected():
-                logger.info("✅ PUBLISH client is connected")
+                logger.info("[OK] PUBLISH client is connected")
             else:
-                logger.warning(f"⚠️  PUBLISH client not yet connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}")
+                logger.warning(f"[WARN]  PUBLISH client not yet connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}")
                 logger.warning("   This is normal - connection happens asynchronously. Messages will be queued until connection is established.")
                 logger.warning(f"   Verify broker is running: Test-NetConnection -ComputerName {MQTT_PUBLISH_BROKER} -Port {MQTT_PUBLISH_PORT}")
         except Exception as e:
-            logger.error(f"❌ Failed to connect to PUBLISH MQTT broker ({MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}): {e}")
+            logger.error(f"[ERR] Failed to connect to PUBLISH MQTT broker ({MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}): {e}")
             logger.error(f"   Error type: {type(e).__name__}")
             import traceback
             logger.debug(f"   Traceback: {traceback.format_exc()}")
-            logger.warning("⚠️  Predictions will be queued and published when broker becomes available")
+            logger.warning("[WARN]  Predictions will be queued and published when broker becomes available")
             # Still start the loop - it will retry connection
             publish_client.loop_start()
         
@@ -630,32 +630,32 @@ def _initialize_publish_client():
         # This allows the queue to start processing once connection is established
         # Make sure message_queue is initialized first
         if message_queue is None:
-            logger.warning("⚠️  Message queue not initialized yet, initializing components...")
+            logger.warning("[WARN]  Message queue not initialized yet, initializing components...")
             _initialize_components()
         
         if message_queue is not None:
             message_queue.set_mqtt_client(publish_client)
-            logger.info("✅ Message queue configured with publish client")
+            logger.info("[OK] Message queue configured with publish client")
             
             # Check connection status after a moment
             time.sleep(1)
             if publish_client.is_connected():
-                logger.info("✅ PUBLISH client is connected - ready to publish")
+                logger.info("[OK] PUBLISH client is connected - ready to publish")
             else:
-                logger.warning(f"⚠️  PUBLISH client not yet connected - messages will be queued")
+                logger.warning(f"[WARN]  PUBLISH client not yet connected - messages will be queued")
                 logger.warning(f"   Connection will be established asynchronously")
                 logger.warning(f"   Check broker accessibility: {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}")
         else:
-            logger.error("❌ Message queue is still None after initialization attempt")
+            logger.error("[ERR] Message queue is still None after initialization attempt")
         
         _publish_client_initialized = True
         
-        logger.info(f"✅ PUBLISH client initialized (broker: {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT})")
+        logger.info(f"[OK] PUBLISH client initialized (broker: {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT})")
         logger.info(f"   Connection status will be updated when broker connects")
         
     except Exception as e:
-        logger.error(f"❌ Error initializing PUBLISH client: {e}")
-        logger.warning("⚠️  Predictions will be queued but may not be published until client is initialized")
+        logger.error(f"[ERR] Error initializing PUBLISH client: {e}")
+        logger.warning("[WARN]  Predictions will be queued but may not be published until client is initialized")
 
 # Initialize publish client only when main.py is run directly, not when imported
 # This allows subscriber.py to import process_raw_sensor_data without initializing MQTT clients
@@ -880,7 +880,34 @@ sensor_data = {
 latest_position = {"x": None, "y": None}
 
 # MQTT Configuration
-MQTT_PUBLISH_TOPIC = "predictions"
+# Publishing topic prefixes from .env (topic = prefix/device_id; context may overwrite MQTT_PUBLISH_TOPIC)
+MQTT_TOPIC_PREDICTIONS_PREFIX = os.getenv("MQTT_PUBLISH_TOPIC_PREDICTIONS", "predictions")
+LPS_POSITION_TOPIC_PREFIX = os.getenv("MQTT_PUBLISH_TOPIC_LPS", "lps")
+MQTT_PUBLISH_TOPIC = "predictions"  # default; often overwritten by context with full topic per device
+
+
+def _publish_position_immediate(device_id: str, x: float, y: float) -> None:
+    """
+    Publish position to lps/{device_id} immediately so the visualization
+    can update the plot without waiting for the full ML prediction pipeline.
+    Reduces perceived latency when using real sensor data.
+    """
+    global client
+    if client is None or not (hasattr(client, "is_connected") and client.is_connected()):
+        return
+    try:
+        topic = f"{LPS_POSITION_TOPIC_PREFIX}/{_normalize_device_id(device_id)}"
+        x_val, y_val = round(x, 4), round(y, 4)
+        payload = json.dumps({
+            "device_id": device_id,
+            "positions": {"x": x_val, "y": y_val},
+            "x": x_val,
+            "y": y_val
+        })
+        client.publish(topic, payload, qos=0)  # qos=0 for lowest latency
+        logger.info(f"[OK] Publishing to {topic} (lps/+) completed for device {device_id}: x={x:.2f}, y={y:.2f}")
+    except Exception as e:
+        logger.debug(f"Could not publish immediate position: {e}")
 
 
 # --- Model input dimension cache and helpers ---
@@ -927,7 +954,7 @@ def predict_with_adaptive_input(model: Any, base_features: List[float]) -> NDArr
         except Exception as e:
             error_msg = f"Model prediction failed: {e}"
             logger.error(error_msg)
-            print(f"❌ {error_msg}")
+            print(f"[ERR] {error_msg}")
             
             # Check for specific CUDA/Hummingbird errors
             error_str = str(e).lower()
@@ -939,7 +966,7 @@ def predict_with_adaptive_input(model: Any, base_features: List[float]) -> NDArr
                 try:
                     fallback_msg = "Attempting CPU fallback for prediction"
                     logger.warning(f"{fallback_msg} - CUDA error: {e}")
-                    print(f"⚠️ {fallback_msg}")
+                    print(f"[WARN] {fallback_msg}")
                     
                     # Create a temporary CPU copy of the model
                     cpu_model = model
@@ -949,12 +976,12 @@ def predict_with_adaptive_input(model: Any, base_features: List[float]) -> NDArr
                     
                     success_msg = "CPU fallback successful"
                     logger.info(success_msg)
-                    print(f"✅ {success_msg}")
+                    print(f"[OK] {success_msg}")
                     return result
                 except Exception as cpu_e:
                     cpu_error_msg = f"CPU fallback also failed: {cpu_e}"
                     logger.error(cpu_error_msg)
-                    print(f"❌ {cpu_error_msg}")
+                    print(f"[ERR] {cpu_error_msg}")
                     
                     # Log the fallback failure and return default
                     logger.warning("Returning default heart rate due to prediction failure")
@@ -968,7 +995,7 @@ def predict_with_adaptive_input(model: Any, base_features: List[float]) -> NDArr
     except Exception as e:
         error_msg = f"Error in predict_with_adaptive_input: {e}"
         logger.error(error_msg)
-        print(f"❌ {error_msg}")
+        print(f"[ERR] {error_msg}")
         logger.warning("Returning default heart rate due to critical prediction error")
         return np.array([60.0])  # Default heart rate
 
@@ -1957,10 +1984,7 @@ def process_data() -> None:
         "total_trimp": total_trimp,
         #--"hr_rest": hr_rest,
         #--"hr_max": hr_max,
-        "position": {
-            "x": latest_position["x"] if latest_position["x"] is not None else 0.0,
-            "y": latest_position["y"] if latest_position["y"] is not None else 0.0
-        },
+        # Position (x, y) is published only to lps/+ for low-latency visualization; not included in predictions/+
         # Include engineered features snapshot for this window
         #--"window_features": window_features if window_features is not None else {},
         # Data quality assessment
@@ -1988,7 +2012,7 @@ def process_data() -> None:
         json.dump(output, f, indent=2)
 
     # MQTT publishing with reliable message queue
-    publish_topic = f"predictions/{_normalize_device_id(device_id)}"
+    publish_topic = f"{MQTT_TOPIC_PREDICTIONS_PREFIX}/{_normalize_device_id(device_id)}"
     try:
         # Queue message for reliable delivery
         message_id = message_queue.queue_message(
@@ -1997,12 +2021,13 @@ def process_data() -> None:
             qos=1,
             retain=False
         )
+        logger.info(f"[OK] Publishing to {publish_topic} (predictions/+) completed.")
         
         if device_id not in prediction_logged_devices:
             # Check connection status for logging
             queue_client = message_queue.mqtt_client if hasattr(message_queue, 'mqtt_client') else None
             is_connected = queue_client.is_connected() if queue_client else False
-            status = "✅ Connected" if is_connected else "⚠️ Queued (waiting for connection)"
+            status = "[OK] Connected" if is_connected else "[WARN] Queued (waiting for connection)"
             logger.info(f"Queued prediction message {message_id} for reliable delivery to topic: {publish_topic} | Status: {status}")
             prediction_logged_devices.add(device_id)
             
@@ -2012,6 +2037,7 @@ def process_data() -> None:
         try:
             if client and hasattr(client, "is_connected") and client.is_connected():
                 client.publish(publish_topic, json.dumps(output), qos=1)
+                logger.info(f"[OK] Publishing to {publish_topic} (predictions/+) completed (fallback).")
                 logger.warning("Used fallback direct MQTT publishing")
             else:
                 logger.error("Fallback publish skipped: MQTT client not connected")
@@ -2072,8 +2098,8 @@ def process_data() -> None:
             health_status = health_monitor.get_current_health_status()
             if "overall_status" in health_status:
                 status_emoji = {
-                    "healthy": "✅",
-                    "warning": "⚠️", 
+                    "healthy": "ok",
+                    "warning": "warn", 
                     "critical": "🚨",
                     "unknown": "❓"
                 }.get(health_status["overall_status"], "❓")
@@ -2134,7 +2160,7 @@ def on_connect_publish(mqtt_client: mqtt.Client, userdata: Any, flags: Dict[str,
     """
     global client
     if rc == 0:
-        logger.info(f"✅ Connected to PUBLISH MQTT Broker ({MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}) with result code: {rc}")
+        logger.info(f"[OK] Connected to PUBLISH MQTT Broker ({MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}) with result code: {rc}")
         # Set up message queue with publish client (ensure it's set even if already set)
         message_queue.set_mqtt_client(mqtt_client)
         # Update global client reference
@@ -2152,7 +2178,7 @@ def on_connect_publish(mqtt_client: mqtt.Client, userdata: Any, flags: Dict[str,
         except Exception as e:
             logger.debug(f"Could not get queue stats: {e}")
         
-        logger.info("✅ MQTT message queue configured with publish client - messages will now be published")
+        logger.info("[OK] MQTT message queue configured with publish client - messages will now be published")
         
         # Force immediate processing attempt
         try:
@@ -2162,9 +2188,9 @@ def on_connect_publish(mqtt_client: mqtt.Client, userdata: Any, flags: Dict[str,
         except:
             pass
     else:
-        logger.error(f"❌ Failed to connect to PUBLISH MQTT Broker ({MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}) with result code: {rc}")
+        logger.error(f"[ERR] Failed to connect to PUBLISH MQTT Broker ({MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT}) with result code: {rc}")
         logger.error(f"   Connection error codes: 1=Connection refused, 2=Identifier rejected, 3=Server unavailable, 4=Bad credentials, 5=Not authorized")
-        logger.warning("⚠️  Messages will be queued and published when broker connection is established")
+        logger.warning("[WARN]  Messages will be queued and published when broker connection is established")
 
 def on_disconnect_subscribe(client: mqtt.Client, userdata: Any, rc: int) -> None:
     """
@@ -2209,7 +2235,7 @@ def on_disconnect_publish(client: mqtt.Client, userdata: Any, rc: int) -> None:
     if rc == 0:
         logger.info("ℹ️  Disconnected from PUBLISH MQTT Broker (normal disconnect)")
     else:
-        logger.warning(f"⚠️  Unexpected disconnect from PUBLISH MQTT Broker (code: {rc})")
+        logger.warning(f"[WARN]  Unexpected disconnect from PUBLISH MQTT Broker (code: {rc})")
     
     # Don't clear the client - let it reconnect and the queue will resume publishing
     logger.info("Messages will continue to be queued and published when connection is restored")
@@ -2374,13 +2400,13 @@ def on_message_subscribe(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessa
                 latest_position["y"] = float(pos_y)
                 # Debug: Log position updates for PM001
                 if athlete_id == "PM001":
-                    print(f"🔵 PM001 position updated in on_message_subscribe: ({latest_position['x']:.2f}, {latest_position['y']:.2f})")
+                    print(f"[PM001] PM001 position updated in on_message_subscribe: ({latest_position['x']:.2f}, {latest_position['y']:.2f})")
             except (ValueError, TypeError) as e:
-                print(f"⚠️  Error converting position for {athlete_id}: x={pos_x}, y={pos_y}, error={e}")
+                print(f"[WARN]  Error converting position for {athlete_id}: x={pos_x}, y={pos_y}, error={e}")
         else:
             # Debug: Log when position is not updated
             if athlete_id == "PM001" and (pos_x is None or pos_y is None):
-                print(f"⚠️  PM001 position NOT updated in on_message_subscribe: x={pos_x}, y={pos_y} (from parsed_data)")
+                print(f"[WARN]  PM001 position NOT updated in on_message_subscribe: x={pos_x}, y={pos_y} (from parsed_data)")
 
         # Convert publisher.py format to the expected format
         # Handle magno as single value (from subscriber.py) or as dict with x, y, z (from publisher.py)
@@ -2577,15 +2603,18 @@ def process_raw_sensor_data(parsed_data: Dict[str, Any], device_id: str) -> None
             try:
                 latest_position["x"] = float(pos_x)
                 latest_position["y"] = float(pos_y)
+                # Publish position immediately to lps/data/{device_id} so visualization
+                # updates the plot without waiting for the full ML pipeline (reduces latency).
+                _publish_position_immediate(device_id, latest_position["x"], latest_position["y"])
                 # Debug: Log position updates for PM001
                 if device_id == "PM001":
-                    print(f"🔵 PM001 position updated in process_raw_sensor_data: ({latest_position['x']:.2f}, {latest_position['y']:.2f})")
+                    print(f"[PM001] PM001 position updated in process_raw_sensor_data: ({latest_position['x']:.2f}, {latest_position['y']:.2f})")
             except (ValueError, TypeError) as e:
-                print(f"⚠️  Error converting position for {device_id}: x={pos_x}, y={pos_y}, error={e}")
+                print(f"[WARN]  Error converting position for {device_id}: x={pos_x}, y={pos_y}, error={e}")
         else:
             # Debug: Log when position is not updated
             if device_id == "PM001" and (pos_x is None or pos_y is None):
-                print(f"⚠️  PM001 position NOT updated in process_raw_sensor_data: x={pos_x}, y={pos_y} (from parsed_data)")
+                print(f"[WARN]  PM001 position NOT updated in process_raw_sensor_data: x={pos_x}, y={pos_y} (from parsed_data)")
         
         # Store subhost_id and pm_id in context if provided
         if "subhost_id" in parsed_data:
@@ -2771,21 +2800,21 @@ if __name__ == "__main__":
     try:
         result = subscribe_client.connect(MQTT_SUBSCRIBE_BROKER, MQTT_SUBSCRIBE_PORT, 60)
         if result == mqtt.MQTT_ERR_SUCCESS:
-            logger.info("✅ SUBSCRIBE client connection initiated (will connect asynchronously)")
+            logger.info("[OK] SUBSCRIBE client connection initiated (will connect asynchronously)")
         else:
-            logger.warning(f"⚠️  SUBSCRIBE client connect() returned code: {result}")
+            logger.warning(f"[WARN]  SUBSCRIBE client connect() returned code: {result}")
         subscribe_client.loop_start()
         
         # Wait a moment and check connection status
         time.sleep(2)
         if subscribe_client.is_connected():
-            logger.info("✅ SUBSCRIBE client is connected")
+            logger.info("[OK] SUBSCRIBE client is connected")
         else:
-            logger.warning(f"⚠️  SUBSCRIBE client not yet connected to {MQTT_SUBSCRIBE_BROKER}:{MQTT_SUBSCRIBE_PORT}")
+            logger.warning(f"[WARN]  SUBSCRIBE client not yet connected to {MQTT_SUBSCRIBE_BROKER}:{MQTT_SUBSCRIBE_PORT}")
             logger.warning("   Check if broker is running and accessible. Will retry connection automatically.")
     except Exception as e:
-        logger.error(f"❌ Failed to connect to SUBSCRIBE MQTT broker ({MQTT_SUBSCRIBE_BROKER}:{MQTT_SUBSCRIBE_PORT}): {e}")
-        logger.warning("⚠️  Will retry connection automatically. Make sure the MQTT broker is running.")
+        logger.error(f"[ERR] Failed to connect to SUBSCRIBE MQTT broker ({MQTT_SUBSCRIBE_BROKER}:{MQTT_SUBSCRIBE_PORT}): {e}")
+        logger.warning("[WARN]  Will retry connection automatically. Make sure the MQTT broker is running.")
         # Still start the loop - it will retry connection
         subscribe_client.loop_start()
     
@@ -2826,18 +2855,18 @@ if __name__ == "__main__":
                     sent = queue_stats.get('status_counts', {}).get('sent', 0)
                     failed = queue_stats.get('status_counts', {}).get('failed', 0)
                     if pending > 0 or sent > 0:
-                        logger.info(f"📊 Publish Status: ✅ Connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} | Queue: {pending} pending, {sent} sent, {failed} failed")
+                        logger.info(f"[STAT] Publish Status: Connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} | Queue: {pending} pending, {sent} sent, {failed} failed")
                 except Exception as e:
                     logger.debug(f"Error getting queue stats: {e}")
             else:
                 try:
                     queue_stats = message_queue.get_queue_stats()
                     pending = queue_stats.get('status_counts', {}).get('pending', 0)
-                    logger.warning(f"⚠️  Publish client NOT connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} | {pending} messages queued")
+                    logger.warning(f"[WARN]  Publish client NOT connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} | {pending} messages queued")
                     logger.warning(f"   Check if broker at {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} is running and accessible")
                     logger.warning(f"   Test connection: mosquitto_sub -h {MQTT_PUBLISH_BROKER} -p {MQTT_PUBLISH_PORT} -t '#' -v")
                 except Exception as e:
-                    logger.warning(f"⚠️  Publish client NOT connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} (error getting stats: {e})")
+                    logger.warning(f"[WARN]  Publish client NOT connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} (error getting stats: {e})")
         
         # Check publish client connection status every 30 seconds
         if current_time - last_publish_status_check >= 30:
@@ -2849,11 +2878,11 @@ if __name__ == "__main__":
                 sent = queue_stats.get('status_counts', {}).get('sent', 0)
                 failed = queue_stats.get('status_counts', {}).get('failed', 0)
                 if pending > 0 or sent > 0:
-                    logger.info(f"📊 Publish Status: Connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} | Queue: {pending} pending, {sent} sent, {failed} failed")
+                    logger.info(f"[STAT] Publish Status: Connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} | Queue: {pending} pending, {sent} sent, {failed} failed")
             else:
                 queue_stats = message_queue.get_queue_stats()
                 pending = queue_stats.get('status_counts', {}).get('pending', 0)
-                logger.warning(f"⚠️  Publish client NOT connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} | {pending} messages queued")
+                logger.warning(f"[WARN]  Publish client NOT connected to {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} | {pending} messages queued")
                 logger.warning(f"   Check if broker at {MQTT_PUBLISH_BROKER}:{MQTT_PUBLISH_PORT} is running and accessible")
         # Both clients use loop_start() so we just need to keep the main loop running
         time.sleep(1.0)  # Sleep to prevent CPU spinning
@@ -2880,7 +2909,7 @@ if __name__ == "__main__":
                 # Check if device has become inactive
                 if device_state['active'] and time_since_last_data > DATA_TIMEOUT_SECONDS:
                     # Device was active but now inactive
-                    print(f"\n⚠️  WARNING: No data received from Player {athlete_id} (Device {device_id_str}) for {time_since_last_data:.1f} seconds")
+                    print(f"\n[WARN]  WARNING: No data received from Player {athlete_id} (Device {device_id_str}) for {time_since_last_data:.1f} seconds")
                     print(f"   Last data received at: {datetime.fromtimestamp(last_data_time).strftime('%Y-%m-%d %H:%M:%S')}")
                     logger.warning(f"Device {device_id_str} (Player {athlete_id}) inactive - no data for {time_since_last_data:.1f}s")
                     device_state['active'] = False
@@ -2889,12 +2918,12 @@ if __name__ == "__main__":
                 # Report periodically if device remains inactive (every 30 seconds)
                 elif not device_state['active'] and time_since_last_data > DATA_TIMEOUT_SECONDS:
                     if current_time - device_state['last_report_time'] >= 30:
-                        print(f"⚠️  Player {athlete_id} (Device {device_id_str}) still inactive - {time_since_last_data:.1f}s since last data")
+                        print(f"[WARN]  Player {athlete_id} (Device {device_id_str}) still inactive - {time_since_last_data:.1f}s since last data")
                         device_state['last_report_time'] = current_time
                 
                 # Check if device has become active again
                 elif not device_state['active'] and time_since_last_data <= DATA_TIMEOUT_SECONDS:
-                    print(f"\n✅ Player {athlete_id} (Device {device_id_str}) is now ACTIVE again")
+                    print(f"\n[OK] Player {athlete_id} (Device {device_id_str}) is now ACTIVE again")
                     logger.info(f"Device {device_id_str} (Player {athlete_id}) active again")
                     device_state['active'] = True
             
@@ -2906,7 +2935,7 @@ if __name__ == "__main__":
                     print("\n" + "="*60)
                     print("📡 PUBLISHER STATUS: ALL DEVICES INACTIVE")
                     print("="*60)
-                    print(f"⚠️  No data received from any device for {DATA_TIMEOUT_SECONDS}+ seconds")
+                    print(f"[WARN]  No data received from any device for {DATA_TIMEOUT_SECONDS}+ seconds")
                     print(f"   Total devices tracked: {len(device_activity_states)}")
                     print(f"   This likely means the publisher has been stopped.")
                     print("\nDevice Last Activity Times:")
@@ -2923,7 +2952,7 @@ if __name__ == "__main__":
                 elif not all_inactive and all_devices_inactive_reported:
                     # At least one device is active again
                     print("\n" + "="*60)
-                    print("✅ PUBLISHER RESUMED: Data flow detected")
+                    print("[OK] PUBLISHER RESUMED: Data flow detected")
                     print("="*60)
                     logger.info("Publisher resumed - receiving data again")
                     all_devices_inactive_reported = False

@@ -13,7 +13,7 @@ mqtt:
 devices:
   count: 30  # Number of devices to track (matches athlete system)
   topic_patterns:
-    lps_specific: "lps/data/{device_id}"      # LPS-specific position data
+    lps_specific: "lps/{device_id}"          # LPS position data (immediate updates from main.py)
     legacy: "player/{device_id}/sensor/data"  # Legacy sensor data (may contain position)
   position_timeout: 5.0  # Seconds before considering position stale
 

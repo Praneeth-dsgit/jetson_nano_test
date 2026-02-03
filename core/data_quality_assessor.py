@@ -80,6 +80,17 @@ class SensorDataQualityAssessor:
             'consistency_window': 10  # Window for consistency checks
         }
     
+    @staticmethod
+    def _to_float(val, default: float = np.nan) -> float:
+        """Convert value to float; return default if None, non-numeric, or invalid. Safe for np.isnan()."""
+        if val is None:
+            return default
+        try:
+            f = float(val)
+            return f if np.isfinite(f) else default
+        except (TypeError, ValueError):
+            return default
+    
     def assess_sensor_data_quality(self, 
                                  acc_data: Dict[str, float],
                                  gyro_data: Dict[str, float],
@@ -101,6 +112,12 @@ class SensorDataQualityAssessor:
         """
         if timestamp is None:
             timestamp = datetime.now()
+        
+        # Coerce inputs to float so np.isnan() and arithmetic work (handles string/None from pipe-delimited data)
+        acc_data = {k: self._to_float(acc_data.get(k)) for k in ('x', 'y', 'z')}
+        gyro_data = {k: self._to_float(gyro_data.get(k)) for k in ('x', 'y', 'z')}
+        hr_data = self._to_float(hr_data)
+        mag_data = {k: self._to_float(mag_data.get(k)) for k in ('x', 'y', 'z')}
         
         # Add data to buffers
         self._add_to_buffers(acc_data, gyro_data, hr_data, mag_data)
