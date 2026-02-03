@@ -174,7 +174,8 @@ def _init_device_context(device_id_str: str) -> Dict[str, Any]:
         "gyro_mag_history": deque(maxlen=5),
         # Timing/session
         "session_start_time": None,
-        "last_vo2_update_time": None,
+    "last_vo2_update_time": None,
+    "last_trimp_update_time": None,
         "last_data_time": time.time(),
         "last_warning_time": 0,
         "vo2_max_value": "-",
@@ -232,6 +233,7 @@ def _load_context_to_globals(ctx: Dict[str, Any]) -> None:
 
     session_start_time = ctx.get("session_start_time", None)
     last_vo2_update_time = ctx.get("last_vo2_update_time", None)
+    last_trimp_update_time = ctx.get("last_trimp_update_time", None)
     last_data_time = ctx.get("last_data_time", time.time())
     last_warning_time = ctx.get("last_warning_time", 0)
     vo2_max_value = ctx.get("vo2_max_value", "-")
@@ -269,6 +271,7 @@ def _save_globals_to_context(ctx: Dict[str, Any]) -> None:
     ctx["session_ended"] = session_ended
     ctx["trimp_buffer"] = trimp_buffer
     ctx["total_trimp"] = total_trimp
+    ctx["last_trimp_update_time"] = last_trimp_update_time
 
 # Setup logging
 def setup_logging(athlete_id: int, device_id: str) -> logging.Logger:
@@ -839,6 +842,7 @@ session_ended = False
 
 # Update Timers
 last_vo2_update_time = None
+last_trimp_update_time = None
 last_data_time = time.time()
 last_warning_time = 0
 
