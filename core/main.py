@@ -174,8 +174,8 @@ def _init_device_context(device_id_str: str) -> Dict[str, Any]:
         "gyro_mag_history": deque(maxlen=5),
         # Timing/session
         "session_start_time": None,
-    "last_vo2_update_time": None,
-    "last_trimp_update_time": None,
+        "last_vo2_update_time": None,
+        "last_trimp_update_time": None,
         "last_data_time": time.time(),
         "last_warning_time": 0,
         "vo2_max_value": "-",
@@ -1552,7 +1552,7 @@ def process_data() -> None:
         This function uses global variables extensively. Consider refactoring
         to use a class-based approach for better encapsulation.
     """
-    global session_start_time, last_vo2_update_time, vo2_max_value
+    global session_start_time, last_vo2_update_time, last_trimp_update_time, vo2_max_value
     global quaternion
     global g_impact_count
     global hrv_rmssd
@@ -1901,17 +1901,35 @@ def process_data() -> None:
     # --- TRIMP Calculation ---
     if len(hr_buffer) >= 5:                             # Need at least 5 HR readings for meaningful TRIMP
         hr_avg = np.mean(list(hr_buffer)[-5:])          # Use last 5 HR readings
-        duration_min = elapsed_time / 60.0              # Convert to minutes
         gender_str = "male" if gender == 1 else "female"
-        
-        current_trimp = calculate_trimp(hr_avg, hr_rest, hr_max, duration_min, gender_str)
-        trimp_buffer.append(current_trimp)
+
+        # Ensure session start and last update timestamps are initialized
+        if session_start_time is None:
+            session_start_time = now
+            # initialize last_trimp_update_time to avoid counting whole session repeatedly
+            last_trimp_update_time = now
+
+        # Compute delta minutes since last TRIMP update (incremental TRIMP)
+        if last_trimp_update_time is None:
+            delta_min = elapsed_time / 60.0
+        else:
+            delta_min = max(0.0, (now - last_trimp_update_time) / 60.0)
+
+        # Only compute if there's a measurable delta
+        if delta_min > 0:
+            current_trimp = calculate_trimp(hr_avg, hr_rest, hr_max, delta_min, gender_str)
+            trimp_buffer.append(current_trimp)
+            # update last update timestamp
+            last_trimp_update_time = now
+        else:
+            current_trimp = 0.0
+
         total_trimp = round(sum(trimp_buffer), 2)
-        
+
         # Get TRIMP zone and recovery recommendations
         trimp_zone, zone_description = get_trimp_zone(total_trimp)
         recovery_time, recovery_recommendations = get_recovery_recommendations(total_trimp, avg_stress)
-        
+
         print(f"TRIMP: {round(current_trimp, 2)} | Total: {total_trimp} | Zone: {trimp_zone}")
         print(f"Recovery: {recovery_time} | {zone_description}")
     else:
