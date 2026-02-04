@@ -461,6 +461,10 @@ class RawDataSubscriber:
         # Store last known positions for each device (used when 1 anchor is missing)
         self.last_positions: Dict[str, Tuple[float, float]] = {}
         
+        # Position smoothing (EMA) to reduce sensor noise; 1.0 = no smoothing, 0.2 = strong
+        self.position_smooth_alpha = float(os.getenv("LPS_POSITION_SMOOTHING", "0.5"))
+        self.smoothed_position: Dict[str, Tuple[float, float]] = {}
+        
         # Initialize MQTT client
         if client_id is None:
             client_id = f"rawData_subscriber_{int(time.time())}"
@@ -848,6 +852,18 @@ class RawDataSubscriber:
                         validate_scale=True,
                         last_position=last_pos
                     )
+                    
+                    # Apply EMA smoothing to reduce sensor noise (optional: set LPS_POSITION_SMOOTHING=1 to disable)
+                    if x is not None and y is not None:
+                        alpha = self.position_smooth_alpha
+                        prev = self.smoothed_position.get(device_id)
+                        if prev is None:
+                            sx, sy = x, y
+                        else:
+                            sx = alpha * x + (1.0 - alpha) * prev[0]
+                            sy = alpha * y + (1.0 - alpha) * prev[1]
+                        self.smoothed_position[device_id] = (sx, sy)
+                        x, y = sx, sy
                     
                     # Store valid position as last known position (skip origin)
                     if x is not None and y is not None and (x > 0.1 or y > 0.1):

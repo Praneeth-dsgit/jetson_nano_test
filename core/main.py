@@ -774,6 +774,7 @@ WINDOW_SAMPLES = int(WINDOW_SECONDS * FS_HZ)    # Samples per window
 ROLLING_WINDOW_SIZE = 30                        # Main rolling window size
 HRV_WINDOW_SECONDS = 10                         # HRV window duration (seconds)
 HRV_WINDOW_SAMPLES = int(HRV_WINDOW_SECONDS * FS_HZ)
+HR_MAX_BPM = 220                        # Elite athlete physiological max; clamp displayed HR to this
 
 # G-Impact Detection Parameters
 G_IMPACT_ACC_THRESHOLD = 8 * 9.81               # 8g threshold (m/s²)
@@ -1334,7 +1335,7 @@ def calculate_stress(
     # Typical RMSSD range: 20-200ms, with 50-100ms being normal
     # Higher HRV = lower stress, so invert the relationship
     if hrv <= 0:
-        hrv_norm = 1.0  # No HRV data = assume high stress
+        hrv_norm = 0.5  # No HRV data = neutral (don't assume high stress)
     else:
         # Normalize: 100ms = 0 stress, 20ms = 1 stress
         hrv_norm = max(0, min(1, (100 - hrv) / 80))
@@ -1351,9 +1352,9 @@ def calculate_stress(
         0.1 * gyro_norm       # Gyro contributes less
     )
     
-    # Gentler sigmoid curve (less steep transition)
-    # Adjust parameters for more realistic stress response curve
+    # Gentler sigmoid curve; cap at 95% so we don't show 100% from model/clamped inputs
     stress_percent = 100 * (1 / (1 + np.exp(-4 * (score - 0.3))))
+    stress_percent = min(95.0, stress_percent)
     
     # Clamp to valid range
     return round(max(0, min(100, stress_percent)), 1)
@@ -1800,8 +1801,11 @@ def process_data() -> None:
             return
 
 
-    hr_buffer.append(predicted_hr)
-    hrv_hr_buffer.append(predicted_hr)
+    # Clamp HR to physiological range (30-220 BPM) for buffers so RMSSD and stress get valid inputs.
+    # Model can output out-of-range values (e.g. 500+ bpm); using raw values would zero out HRV and max stress.
+    hr_for_buffers = max(30.0, min(220.0, float(predicted_hr)))
+    hr_buffer.append(hr_for_buffers)
+    hrv_hr_buffer.append(hr_for_buffers)
 
     # Display activity metrics for every prediction (moved above heart rate)
     current_acc_display = acc_buffer[-1] if len(acc_buffer) > 0 else (acc_mag_buffer[-1] if len(acc_mag_buffer) > 0 else 0.0)
@@ -1815,7 +1819,8 @@ def process_data() -> None:
     if actual_hr is not None and mode == "training":
         print(f"Heart Rate: {actual_hr} bpm (actual) | Mode: {mode}")
     elif mode == "game":
-        print(f"Heart Rate: {predicted_hr} bpm (predicted) | Mode: {mode}")
+        max_hr = min(float(predicted_hr), HR_MAX_BPM)
+        print(f"Heart Rate: {max_hr:.1f} bpm (predicted) | Mode: {mode}")
     else:
         print(f"Heart Rate: - bpm | Mode: {mode}")
 
@@ -1838,13 +1843,14 @@ def process_data() -> None:
         current_hrv = calculate_rmssd(hrv_hr_buffer)
         print(f"HRV (RMSSD, 10s): {current_hrv:.1f} ms")
     else:
-        print(f"HRV (RMSSD): Calculating... (need {5 - len(hr_buffer)} more readings)")
+        print(f"HRV (RMSSD): Calculating... (need {5 - len(hrv_hr_buffer)} more readings)")
     
     # Show comprehensive health metrics every 5 predictions for better visibility
     if len(hr_buffer) % 5 == 0 and len(hr_buffer) > 0:  # Show detailed metrics every 5 predictions
-        # Display stress if available
-        if len(hr_buffer) >= ROLLING_WINDOW_SIZE:
-            current_stress = calculate_stress(np.mean(hr_buffer), hrv_rmssd, np.mean(acc_buffer), np.mean(gyro_buffer), age, gender, hr_rest, hr_max)
+        # Display stress if available (use freshly computed HRV so stress matches displayed HRV)
+        if len(hr_buffer) >= ROLLING_WINDOW_SIZE and len(hrv_hr_buffer) >= 5:
+            stress_hrv = calculate_rmssd(hrv_hr_buffer)
+            current_stress = calculate_stress(np.mean(hr_buffer), stress_hrv, np.mean(acc_buffer), np.mean(gyro_buffer), age, gender, hr_rest, hr_max)
             print(f"Stress Level: {current_stress:.1f}%")
         
 
@@ -1876,19 +1882,16 @@ def process_data() -> None:
 
     elapsed_time = now - session_start_time
 
-    if elapsed_time >= 300:
+    # VO2 max: show as soon as we have enough HR data (5+ samples), then refresh every 5 min
+    if len(hr_buffer) >= 5:
         if last_vo2_update_time is None or (now - last_vo2_update_time >= 300):
-            if len(hr_buffer) > 0:  # Ensure we have HR data
-                vo2_max_value = estimate_vo2_max(age, gender, np.mean(hr_buffer), hrv_rmssd, hr_rest, hr_max)
-                last_vo2_update_time = now
-                # VO2 updates logged to file only, no console output
-                logger.info(f"VO2 Max Updated: {vo2_max_value} ml/kg/min (HR: {np.mean(hr_buffer):.0f}, HRV: {hrv_rmssd:.1f})")
-            else:
-                # VO2 warnings logged to file only, no console output
-                pass
+            # Use fresh HRV when available so VO2 estimate matches current HRV (same as stress)
+            vo2_hrv = calculate_rmssd(hrv_hr_buffer) if len(hrv_hr_buffer) >= 5 else hrv_rmssd
+            vo2_max_value = estimate_vo2_max(age, gender, np.mean(hr_buffer), vo2_hrv, hr_rest, hr_max)
+            last_vo2_update_time = now
+            logger.info(f"VO2 Max Updated: {vo2_max_value} ml/kg/min (HR: {np.mean(hr_buffer):.0f}, HRV: {vo2_hrv:.1f})")
     else:
         vo2_max_value = "-"
-        # VO2 waiting message removed to reduce verbosity
 
 
     # --- Total Energy Expenditure Calculation ---

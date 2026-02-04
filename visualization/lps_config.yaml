@@ -20,8 +20,8 @@ devices:
 # Field Configuration
 field:
   # FIFA Standard Football Field Dimensions
-  length: 7.0   # meters
-  width: 3.5    # meters
+  length: 17.5   # meters
+  width: 10    # meters
   
   # Field Markings
   center_circle_radius: 9.15  # meters

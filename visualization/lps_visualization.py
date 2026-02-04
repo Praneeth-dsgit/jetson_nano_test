@@ -72,10 +72,8 @@ class LPSConfig:
             # Field settings - check environment variables first, then config file, then defaults
             field_config = config.get('field', {})
             # Use same env vars as subscriber for consistency
-            self.field_length = float(os.getenv("LPS_FIELD_LENGTH", 
-                                                 str(field_config.get('length', 105.0))))
-            self.field_width = float(os.getenv("LPS_FIELD_WIDTH", 
-                                                str(field_config.get('width', 60.0))))
+            self.field_length = float(str(field_config.get('length', 17.5)))
+            self.field_width = float(str(field_config.get('width', 10)))
             
             # FIFA standard dimensions for scaling reference
             FIFA_LENGTH = 105.0
